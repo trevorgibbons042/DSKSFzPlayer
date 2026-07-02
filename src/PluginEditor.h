@@ -4,6 +4,7 @@
 #include "UI/DSKLookAndFeel.h"
 #include "UI/LibraryPanel.h"
 #include "UI/RecorderBar.h"
+#include "UI/AudioVisualizer.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADSRDisplay — live ADSR envelope visualiser
@@ -105,7 +106,7 @@ private:
     };
     FavButton             addFavBtn;
 
-    juce::TextButton      openBtn{ "Open SFZ/SF2/ZIP" };
+    juce::TextButton      openBtn{ "Open SFZ/SF2/DS/ZIP" };
     juce::TextButton      optionsBtn{ "Options" };
 
     // ── AMP section ───────────────────────────────────────────────────────────
@@ -137,6 +138,10 @@ private:
 
     // Grabador MP3 — solo se crea en modo Standalone (oculto por completo en VST3)
     std::unique_ptr<RecorderBar> recorderBar;
+
+    // ── Visualizer ────────────────────────────────────────────────────────────
+    // Ocupa el espacio libre entre la fila de Voices/Grabador y el teclado
+    AudioVisualizer visualizer;
 
     // ── Piano keyboard ────────────────────────────────────────────────────────
     juce::MidiKeyboardComponent keyboard;

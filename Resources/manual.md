@@ -41,8 +41,8 @@ all dragged folders are added.
 
 ### B  Open Button
 
-Click **Open SFZ/SF2/Decent Sampler/ZIP** (top-right of the main panel) to browse for .sfz, .sf2,
-.dspreset, .dslibrary, or .zip files.
+Click **Open SFZ/SF2/DS/ZIP** (top-right of the main panel) to browse for .sfz, .sf2,
+.dspreset, .dslibrary, or .zip files. "DS" stands for Decent Sampler.
 
 ### C  Library Tree
 
@@ -167,6 +167,14 @@ Five independent effect slots, each enabled with its labelled toggle button.
 |----------|--------------------------------------------------|
 | Voices   | Maximum simultaneous voices: 1 – 64             |
 | RR Reset | Reset round-robin counters to the first sample  |
+
+### Visualizer
+
+The panel below the footer (above the keyboard) shows a decorative animation that reacts to the
+sound the plugin produces — it idles gently when nothing plays and comes alive with the audio
+level. Click the small gear button in its bottom-right corner to pick from several animation
+styles (Starfield, Bubbles, Spectrum Bars, Pulse Rings, Plasma Glow, Fireflies, Orbit, Waveform);
+your choice is remembered and its colours automatically match the current theme (dark or light).
 
 ---
 
@@ -294,8 +302,8 @@ soltar; todas las carpetas arrastradas se añaden.
 
 ### B  Botón Open
 
-Haz clic en **Open SFZ/SF2/Decent Sampler/ZIP** (arriba a la derecha) para buscar archivos .sfz,
-.sf2, .dspreset, .dslibrary o .zip.
+Haz clic en **Open SFZ/SF2/DS/ZIP** (arriba a la derecha) para buscar archivos .sfz,
+.sf2, .dspreset, .dslibrary o .zip. "DS" significa Decent Sampler.
 
 ### C  Árbol de Librería
 
@@ -421,6 +429,15 @@ Cinco ranuras de efectos independientes, cada una activada con su botón.
 |----------|--------------------------------------------------------------|
 | Voices   | Número máximo de voces simultáneas: 1 – 64                  |
 | RR Reset | Reinicia los contadores de round-robin a la primera muestra  |
+
+### Visualizador
+
+El panel situado debajo del pie de página (justo encima del teclado) muestra una animación
+decorativa que reacciona al sonido que emite el plugin: se mueve suavemente en reposo y cobra
+vida con el nivel de audio. Haz clic en el pequeño botón con forma de engranaje en su esquina
+inferior derecha para elegir entre varios estilos de animación (Starfield, Bubbles, Spectrum
+Bars, Pulse Rings, Plasma Glow, Fireflies, Orbit, Waveform); tu elección se recuerda y sus
+colores se adaptan automáticamente al tema actual (oscuro o claro).
 
 ---
 

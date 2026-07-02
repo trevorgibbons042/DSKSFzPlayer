@@ -3,7 +3,7 @@
 ![Version 1.0](https://img.shields.io/badge/version-1.0-blue)
 ![Platform](https://img.shields.io/badge/platform-VST3%20%7C%20Standalone-green)
 
-**DSK SFz Player** is a high-performance, 64-voice polyphonic SFZ/SF2 sampler. Designed for music producers and sound designers, it provides a seamless workflow for loading SFZ and SoundFont2 (SF2) instrument libraries with full MIDI control, flexible modulation, and professional-grade effects.
+**DSK SFz Player** is a high-performance, 64-voice polyphonic SFZ/SF2/Decent Sampler sampler. Designed for music producers and sound designers, it provides a seamless workflow for loading SFZ, SoundFont2 (SF2), and Decent Sampler (.dspreset/.dslibrary) instrument libraries with full MIDI control, flexible modulation, and professional-grade effects.
 
 
 <div align="center">
@@ -16,9 +16,9 @@
 
 * **Polyphony:** 64-voice polyphonic engine for rich, layered soundscapes.
 * **Versatile Formats:** Works as a **VST3 Plugin** or as a **Standalone Application**.
-* **Dual Sampler Engine:** Loads both **SFZ** libraries and **SF2 (SoundFont2)** files with the same Library, Favorites, and drag & drop workflow.
-* **Audio Support:** Compatible with WAV, FLAC, and OGG audio formats inside SFZ files.
-* **Drag & Drop Workflow:** Effortlessly load `.sfz`, `.sf2` files, folders, or `.zip` packs directly into the plugin.
+* **Triple Sampler Engine:** Loads **SFZ**, **SF2 (SoundFont2)**, and **Decent Sampler** (`.dspreset`/`.dslibrary`) libraries with the same Library, Favorites, and drag & drop workflow.
+* **Audio Support:** Compatible with WAV, FLAC, and OGG audio formats inside SFZ/Decent Sampler files.
+* **Drag & Drop Workflow:** Effortlessly load `.sfz`, `.sf2`, `.dspreset`, `.dslibrary` files, folders, or `.zip` packs directly into the plugin.
 * **SF2 Bank/Preset Picker:** Multi-bank SoundFont files automatically show a searchable bank/preset selector — reachable at any time by clicking the instrument name in the header.
 * **Sound Sculpting:**
     * Amplitude & Filter envelopes, two versatile LFOs — available for both SFZ and SF2, replacing each preset's own envelope/filter with the plugin's knobs.
@@ -40,8 +40,8 @@
 ### Loading Instruments
 Getting started with DSK SFz Player is intuitive:
 
-1.  **Drag & Drop:** Simply drag an `.sfz` or `.sf2` file, a folder containing instruments, or a `.zip` library pack onto the plugin window.
-2.  **Open Button:** Use the "Open SFZ/SF2/ZIP" button to browse your local files.
+1.  **Drag & Drop:** Simply drag an `.sfz`, `.sf2`, `.dspreset`, or `.dslibrary` file, a folder containing instruments, or a `.zip` library pack onto the plugin window.
+2.  **Open Button:** Use the "Open SFZ/SF2/DS/ZIP" button to browse your local files (DS = Decent Sampler).
 3.  **Library Tree:** Organize your collections using the built-in Library panel. Double-click any entry to load it immediately.
 4.  **SF2 Presets:** If an SF2 file has more than one bank/preset, a picker appears automatically — click the instrument name in the header to reopen it anytime.
 

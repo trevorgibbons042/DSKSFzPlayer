@@ -59,6 +59,7 @@ target_sources(DSKSFzPlayer
         src/UI/LibraryPanel.cpp
         src/UI/SF2PresetPicker.cpp
         src/UI/DSPresetPicker.cpp
+        src/UI/AudioVisualizer.cpp
         src/UI/RemoteBanner.cpp
         src/UI/RecorderBar.cpp
         src/Audio/Mp3Recorder.cpp

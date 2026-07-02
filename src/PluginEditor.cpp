@@ -138,6 +138,7 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
         lf.setTheme(s->getIntValue("uiTheme", 0));
         libWidth = juce::jlimit(120, 450, s->getIntValue("libWidth", LIB_W));
         pluginHeight = juce::jlimit(DEF_H, 1200, s->getIntValue("pluginHeight", DEF_STARTUP_H));
+        visualizer.setStyle(s->getIntValue("vizStyle", (int)AudioVisualizer::Style::Spectrum));
         libraryPanel.loadState(*s);
     }
 
@@ -197,6 +198,7 @@ DSKSFzEditor::~DSKSFzEditor()
         s->setValue("uiTheme", lf.getThemeIndex());
         s->setValue("libWidth", libWidth);
         s->setValue("pluginHeight", pluginHeight);
+        s->setValue("vizStyle", visualizer.getStyle());
         libraryPanel.saveState(*s);
         s->saveIfNeeded();
     }
@@ -247,6 +249,8 @@ void DSKSFzEditor::lookAndFeelChanged()
 
     if (recorderBar != nullptr)
         recorderBar->applyTheme(t);
+
+    visualizer.setThemeColours(t.isDark, t.editorBg, t.accent, t.accent2, t.sectionBg);
 
     repaint();
 }
@@ -657,6 +661,14 @@ void DSKSFzEditor::buildUI()
         addAndMakeVisible(*recorderBar);
     }
 
+    // ── Visualizer ────────────────────────────────────────────────────────────
+    addAndMakeVisible(visualizer);
+    visualizer.onStyleChanged = [this](int)
+    {
+        if (auto* s = proc.getAppProperties().getUserSettings())
+            s->setValue("vizStyle", visualizer.getStyle());
+    };
+
     // ── Piano keyboard ────────────────────────────────────────────────────────
     keyboard.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xFFD8E8F0));
     keyboard.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xFF0D1828));
@@ -844,13 +856,24 @@ void DSKSFzEditor::resized()
     const int hdrLabelX = rx + 8;
     titleLink.setBounds(hdrLabelX, 4, 160, 24);
     siteLink.setBounds(hdrLabelX, 28, 120, 16);
-    const int lcdX = hdrLabelX + 170;
-    const int lcdW = 380;
-    instrNameLabel.setBounds(lcdX, 6, lcdW - 24, 24);
-    statusLabel.setBounds(lcdX, 30, lcdW - 24, 16);
-    addFavBtn.setBounds(lcdX + lcdW - 20, 16, 18, 18); // Botón bajado a Y=15 para centrado vertical perfecto
-    openBtn.setBounds(rx + 780 - 210, 10, 116, 28);
+    const int openBtnW = 160; // ancho aumentado para que el texto largo no se vea diminuto
+    const int openBtnX = rx + 780 - 94 - openBtnW;
+    openBtn.setBounds(openBtnX, 10, openBtnW, 28);
     optionsBtn.setBounds(rx + rw - 90, 10, 82, 28);
+
+    // Botón de favoritos: posición fija justo antes del botón Open.
+    const int favBtnW = 18;
+    const int favBtnX = openBtnX - 10 - favBtnW;
+    addFavBtn.setBounds(favBtnX, 16, favBtnW, 18); // Botón bajado a Y=15 para centrado vertical perfecto
+
+    // Nombre del preset / estado: centrados entre el final del texto "DSK SFz player"
+    // (izquierda) y el botón de favoritos (derecha) — referencia pedida por el usuario.
+    const juce::Font titleFontForWidth(15.0f, juce::Font::bold);
+    const int titleTextEndX = hdrLabelX + (int)titleFontForWidth.getStringWidth("DSK SFz player");
+    const int lcdX = titleTextEndX + 14;
+    const int lcdW = juce::jmax(60, (favBtnX - 10) - lcdX);
+    instrNameLabel.setBounds(lcdX, 6, lcdW, 24);
+    statusLabel.setBounds(lcdX, 30, lcdW, 16);
 
     auto K = [&](juce::Slider& s, int col, int secY)
     { s.setBounds(colX(rx, col), secY + KNOB_Y, KSZ, KSZ); };
@@ -920,6 +943,11 @@ void DSKSFzEditor::resized()
     if (recorderBar != nullptr)
         recorderBar->setBounds(rx + 210, SF + 4, (rx + rw - 90) - (rx + 210), 22);
 
+    // Espacio libre bajo Voices/Grabador hasta el teclado — panel visualizador
+    const int vizY = SF + FTR_H + 2;
+    const int vizBottom = H - KB_H - VDIV_H;
+    visualizer.setBounds(rx, vizY, W - rx, juce::jmax(0, vizBottom - vizY));
+
     for (auto& kl : kLabels)
         kl.lbl->setBounds(kl.s->getX(), kl.s->getBottom() + 2, kl.s->getWidth(), 14);
 }
@@ -983,6 +1011,7 @@ void DSKSFzEditor::timerCallback()
     }
     meterL.store(juce::jmax(meterL.load() * 0.88f, pl));
     meterR.store(juce::jmax(meterR.load() * 0.88f, pr));
+    visualizer.pushLevel(meterL.load(), meterR.load());
 
     if (previewCountdown > 0)
         if (--previewCountdown == 0)
