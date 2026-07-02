@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "UI/DSKLookAndFeel.h"
 #include "UI/LibraryPanel.h"
+#include "UI/RecorderBar.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADSRDisplay — live ADSR envelope visualiser
@@ -133,6 +134,9 @@ private:
     // ── Footer ────────────────────────────────────────────────────────────────
     juce::Slider     voicesKnob;
     juce::TextButton rrResetBtn{ "RR Reset" };
+
+    // Grabador MP3 — solo se crea en modo Standalone (oculto por completo en VST3)
+    std::unique_ptr<RecorderBar> recorderBar;
 
     // ── Piano keyboard ────────────────────────────────────────────────────────
     juce::MidiKeyboardComponent keyboard;

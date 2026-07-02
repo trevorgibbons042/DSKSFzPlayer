@@ -26,6 +26,14 @@ The plugin is 100% safe and free of malware.
 * **If macOS blocks it:** Go to **System Settings > Privacy & Security** and click **"Open Anyway"** for the plugin.
 * **If AVG/Avast or another antivirus blocks it:** Please add the plugin file or your VST3 folder to your antivirus exceptions list.
 
+### Third-Party Licenses
+The Standalone app's MP3 recording feature uses **Shine**, a fixed-point MP3 encoder
+(© 2017 Savonet team and contributors), licensed under the **GNU Lesser General Public
+License v2.1 (LGPL-2.1)**. Shine is statically linked as an unmodified-behaviour, isolated
+encoding component. Its full license text is included with the source distribution at
+`libs/shine/COPYING`; the source code of this project (including any local build
+adjustments to Shine) is available at the project's public repository.
+
 ---
 
 ## 🇪🇸 Español
@@ -53,3 +61,12 @@ El plugin es 100% seguro y libre de software malicioso.
 * **Si Windows Defender lo bloquea:** Haz clic en **"Más información"** y luego en **"Ejecutar de todas formas"**.
 * **Si macOS lo bloquea:** Ve a **Ajustes del Sistema > Privacidad y Seguridad** y haz clic en **"Abrir de todos modos"** para permitir el plugin.
 * **Si AVG/Avast u otro antivirus lo bloquea:** Por favor, añade el archivo del plugin o tu carpeta VST3 a la lista de excepciones (o exclusiones) de tu antivirus.
+
+### Licencias de terceros
+La función de grabación a MP3 de la aplicación Standalone usa **Shine**, un codificador
+MP3 de coma fija (© 2017 equipo de Savonet y colaboradores), licenciado bajo la
+**GNU Lesser General Public License v2.1 (LGPL-2.1)**. Shine se enlaza estáticamente como
+componente de codificación aislado y sin modificaciones de comportamiento. Su texto de
+licencia completo se incluye en la distribución del código fuente en `libs/shine/COPYING`;
+el código fuente de este proyecto (incluyendo cualquier ajuste local de compilación de
+Shine) está disponible en el repositorio público del proyecto.

@@ -58,6 +58,9 @@ target_sources(DSKSFzPlayer
         src/UI/LibraryPanel.cpp
         src/UI/SF2PresetPicker.cpp
         src/UI/RemoteBanner.cpp
+        src/UI/RecorderBar.cpp
+        src/Audio/Mp3Recorder.cpp
+        src/Standalone/CustomStandaloneApp.cpp
 )
 
 target_include_directories(DSKSFzPlayer
@@ -67,6 +70,31 @@ target_include_directories(DSKSFzPlayer
         # librería de un único header, no requiere descarga por CMake.
         "${CMAKE_CURRENT_SOURCE_DIR}/libs/tinysoundfont"
 )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Shine (codificador MP3, vendorizado en libs/shine — LGPL v2, ver
+# libs/shine/COPYING). Usado por el grabador del modo Standalone.
+# ──────────────────────────────────────────────────────────────────────────────
+add_library(shine_enc STATIC
+    libs/shine/bitstream.c
+    libs/shine/huffman.c
+    libs/shine/l3bitstream.c
+    libs/shine/l3loop.c
+    libs/shine/l3mdct.c
+    libs/shine/l3subband.c
+    libs/shine/layer3.c
+    libs/shine/reservoir.c
+    libs/shine/tables.c
+)
+target_include_directories(shine_enc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/libs/shine")
+set_target_properties(shine_enc PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+)
+if (MSVC)
+    target_compile_options(shine_enc PRIVATE /wd4244 /wd4267 /wd4996)
+endif()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Definiciones de compilación
@@ -81,6 +109,9 @@ target_compile_definitions(DSKSFzPlayer
         JUCE_USE_FLAC=1
         JUCE_REPORT_APP_USAGE=0
         JUCE_MODAL_LOOPS_PERMITTED=1
+        # Punto de entrada Standalone propio (src/Standalone/CustomStandaloneApp.cpp):
+        # permite avisar antes de cerrar si hay una grabación MP3 sin guardar.
+        JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -100,6 +131,7 @@ target_link_libraries(DSKSFzPlayer
         juce::juce_graphics
         juce::juce_gui_basics
         juce::juce_gui_extra
+        shine_enc
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags

@@ -241,6 +241,9 @@ void DSKSFzEditor::lookAndFeelChanged()
     for (auto& kl : kLabels)
         kl.lbl->setColour(juce::Label::textColourId, t.text.withAlpha(0.75f));
 
+    if (recorderBar != nullptr)
+        recorderBar->applyTheme(t);
+
     repaint();
 }
 
@@ -643,6 +646,13 @@ void DSKSFzEditor::buildUI()
     rrResetBtn.onClick = [this]() { proc.resetRoundRobin(); };
     addAndMakeVisible(rrResetBtn);
 
+    // Grabador MP3 — solo en Standalone, oculto por completo en VST3
+    if (proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
+    {
+        recorderBar = std::make_unique<RecorderBar>(proc);
+        addAndMakeVisible(*recorderBar);
+    }
+
     // ── Piano keyboard ────────────────────────────────────────────────────────
     keyboard.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xFFD8E8F0));
     keyboard.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xFF0D1828));
@@ -903,6 +913,8 @@ void DSKSFzEditor::resized()
 
     voicesKnob.setBounds(rx + 66, SF + 5, 130, 20);
     rrResetBtn.setBounds(rx + rw - 80, SF + 4, 74, 22);
+    if (recorderBar != nullptr)
+        recorderBar->setBounds(rx + 210, SF + 4, (rx + rw - 90) - (rx + 210), 22);
 
     for (auto& kl : kLabels)
         kl.lbl->setBounds(kl.s->getX(), kl.s->getBottom() + 2, kl.s->getWidth(), 14);

@@ -4,6 +4,7 @@
 #include "SFZ/SFZSynth.h"
 #include "SF2/SF2Synth.h"
 #include "Effects/EffectsChain.h"
+#include "Audio/Mp3Recorder.h"
 
 enum class InstrumentFormat { SFZ, SF2 };
 
@@ -43,6 +44,7 @@ public:
     SFZSynth&     getSynth()   { return synth; }
     SF2Synth&     getSF2Synth(){ return sf2synth; }
     EffectsChain& getFX()      { return fx; }
+    Mp3Recorder&  getRecorder(){ return recorder; }
 
     bool       loadInstrument(const juce::File& file);
     juce::File getCurrentSFZFile() const { return currentSFZFile; }
@@ -67,6 +69,7 @@ private:
     SFZSynth     synth;
     SF2Synth     sf2synth;
     EffectsChain fx;
+    Mp3Recorder  recorder;
     juce::File   currentSFZFile;
     InstrumentFormat currentFormat { InstrumentFormat::SFZ };
 

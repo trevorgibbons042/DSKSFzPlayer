@@ -159,6 +159,28 @@ Five independent effect slots, each enabled with its labelled toggle button.
 
 ---
 
+## Recording (Standalone only)
+
+The recording transport bar sits in the footer, between the Voices slider and RR Reset.
+It is only available in the **Standalone application** — it is completely hidden in the
+VST3 plugin.
+
+| Control      | Description                                                            |
+|---------------|-------------------------------------------------------------------------|
+| ● Record      | Starts/stops recording the plugin's full audio output to MP3          |
+| ▶ Play        | Plays back the last take instantly (kept in memory, no file re-read)  |
+| ■ Stop        | Stops recording or playback                                            |
+| 📁 Folder      | Choose the destination folder for recordings (defaults to Desktop)    |
+| Time counter  | Shows elapsed recording time, or position/total during playback       |
+
+Recordings capture whatever is actually sounding — notes played from an external MIDI
+device or from the PC keyboard — after all effects, exactly as heard. Files are saved as
+`DSK_SFz_Player_YYYY-MM-DD_HHMMSS.mp3` in the chosen folder. Maximum recording length is
+10 minutes per take; recording stops automatically (and the file is finalised) if that
+limit is reached.
+
+---
+
 ## Options Menu
 
 Click **Options** (top-right) to access:
@@ -378,6 +400,28 @@ Cinco ranuras de efectos independientes, cada una activada con su botón.
 |----------|--------------------------------------------------------------|
 | Voices   | Número máximo de voces simultáneas: 1 – 64                  |
 | RR Reset | Reinicia los contadores de round-robin a la primera muestra  |
+
+---
+
+## Grabación (solo Standalone)
+
+La barra de transporte de grabación está en el pie de página, entre el slider Voices y
+RR Reset. Solo está disponible en la **aplicación Standalone** — queda completamente
+oculta en el plugin VST3.
+
+| Control        | Descripción                                                              |
+|-----------------|---------------------------------------------------------------------------|
+| ● Grabar        | Inicia/detiene la grabación de la salida de audio completa del plugin a MP3 |
+| ▶ Reproducir    | Reproduce la última toma al instante (queda en memoria, sin releer el archivo) |
+| ■ Detener       | Detiene la grabación o la reproducción                                    |
+| 📁 Carpeta       | Elige la carpeta de destino de las grabaciones (por defecto, Escritorio) |
+| Contador        | Muestra el tiempo de grabación transcurrido, o la posición/total al reproducir |
+
+La grabación captura lo que realmente suena — notas tocadas desde un dispositivo MIDI
+externo o desde el teclado del PC — después de todos los efectos, tal como se escucha.
+Los archivos se guardan como `DSK_SFz_Player_YYYY-MM-DD_HHMMSS.mp3` en la carpeta elegida.
+La duración máxima de grabación es de 10 minutos por toma; la grabación se detiene sola
+(y el archivo se finaliza) si se alcanza ese límite.
 
 ---
 

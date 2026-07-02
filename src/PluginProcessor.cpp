@@ -107,12 +107,14 @@ void DSKSFzProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     synth.prepare(sampleRate, samplesPerBlock);
     sf2synth.prepare(sampleRate, samplesPerBlock);
     fx.prepare(sampleRate, samplesPerBlock);
+    recorder.prepare(sampleRate, getTotalNumOutputChannels());
     keyboardState.reset();
 }
 
 void DSKSFzProcessor::releaseResources()
 {
     allNotesOff();
+    recorder.stopRecording(); // el dispositivo de audio va a cambiar/cerrarse
 }
 
 void DSKSFzProcessor::processBlock(juce::AudioBuffer<float>& buffer,
@@ -138,6 +140,8 @@ void DSKSFzProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     else
         synth.processBlock(buffer, midiMessages);
     fx.process(buffer);
+
+    recorder.processBlock(buffer);
 }
 
 void DSKSFzProcessor::allNotesOff()
