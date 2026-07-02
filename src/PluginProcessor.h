@@ -6,7 +6,7 @@
 #include "Effects/EffectsChain.h"
 #include "Audio/Mp3Recorder.h"
 
-enum class InstrumentFormat { SFZ, SF2 };
+enum class InstrumentFormat { SFZ, SF2, DecentSampler };
 
 class DSKSFzProcessor : public juce::AudioProcessor
 {
@@ -56,6 +56,15 @@ public:
     bool selectSF2Preset(int presetIndex);
     int  getSF2CurrentPresetIndex() const { return sf2synth.getCurrentPresetIndex(); }
 
+    // Decent Sampler: un .dspreset es un único instrumento (equivalente a .sfz);
+    // un .dslibrary es un paquete zip con uno o varios .dspreset (equivalente a
+    // los bancos/presets de un .sf2). dsPresetList siempre contiene al menos el
+    // preset actualmente cargado, para que la UI pueda tratarlo igual que SF2.
+    bool isDSLoaded() const { return currentFormat == InstrumentFormat::DecentSampler && synth.isLoaded(); }
+    const std::vector<juce::File>& getDSPresetList() const { return dsPresetList; }
+    int  getDSCurrentPresetIndex() const { return dsCurrentPresetIndex; }
+    bool selectDSPreset(int presetIndex);
+
     void allNotesOff();
     void resetRoundRobin();
 
@@ -73,7 +82,13 @@ private:
     juce::File   currentSFZFile;
     InstrumentFormat currentFormat { InstrumentFormat::SFZ };
 
+    std::vector<juce::File> dsPresetList;
+    int  dsCurrentPresetIndex = -1;
+
     juce::ApplicationProperties appProperties;
+
+    bool loadDecentSamplerPreset(const juce::File& dspresetFile);
+    bool loadDSLibrary(const juce::File& dslibraryFile);
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
     void syncParametersToEngine();

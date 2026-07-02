@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "DecentSampler/DecentSamplerParser.h"
 
 juce::AudioProcessorValueTreeState::ParameterLayout DSKSFzProcessor::createParameters()
 {
@@ -288,6 +289,17 @@ bool DSKSFzProcessor::loadInstrument(const juce::File& file)
         ok = sf2synth.loadSF2(file);
         if (ok) currentFormat = InstrumentFormat::SF2;
     }
+    else if (file.hasFileExtension(".dslibrary"))
+    {
+        ok = loadDSLibrary(file);
+    }
+    else if (file.hasFileExtension(".dspreset"))
+    {
+        dsPresetList.clear();
+        dsPresetList.push_back(file);
+        ok = loadDecentSamplerPreset(file);
+        if (ok) dsCurrentPresetIndex = 0;
+    }
     else
     {
         ok = synth.loadSFZ(file);
@@ -299,12 +311,83 @@ bool DSKSFzProcessor::loadInstrument(const juce::File& file)
     return ok;
 }
 
+bool DSKSFzProcessor::loadDecentSamplerPreset(const juce::File& dspresetFile)
+{
+    std::vector<SFZRegion> regions;
+    DecentSamplerParser parser;
+    if (!parser.parse(dspresetFile, regions))
+        return false;
+
+    bool ok = synth.loadRegions(std::move(regions), dspresetFile.getParentDirectory(),
+                                 dspresetFile.getFileNameWithoutExtension());
+    if (ok) currentFormat = InstrumentFormat::DecentSampler;
+    return ok;
+}
+
+bool DSKSFzProcessor::loadDSLibrary(const juce::File& dslibraryFile)
+{
+    // Extrae el .dslibrary (es un zip) a una carpeta cache propia de la app,
+    // igual que .sf2/.sfz se cargan directamente desde disco — sin pedir al
+    // usuario dónde extraer (a diferencia del flujo genérico de .zip).
+    auto cacheRoot = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                          .getChildFile("DSK SFz player")
+                          .getChildFile("DSLibraryCache");
+
+    const juce::String key = dslibraryFile.getFileNameWithoutExtension()
+                              + "_" + juce::String((juce::int64)dslibraryFile.getLastModificationTime()
+                                                        .toMilliseconds());
+    auto destDir = cacheRoot.getChildFile(key);
+
+    if (!destDir.isDirectory() || destDir.getNumberOfChildFiles(juce::File::findFilesAndDirectories) == 0)
+    {
+        destDir.createDirectory();
+        juce::ZipFile zip(dslibraryFile);
+        if (zip.getNumEntries() == 0)
+            return false;
+        auto result = zip.uncompressTo(destDir);
+        if (result.failed())
+            return false;
+    }
+
+    juce::Array<juce::File> found;
+    destDir.findChildFiles(found, juce::File::findFiles, true, "*.dspreset");
+    if (found.isEmpty())
+        return false;
+
+    found.sort();
+    dsPresetList.assign(found.begin(), found.end());
+
+    if (!loadDecentSamplerPreset(dsPresetList[0]))
+        return false;
+
+    dsCurrentPresetIndex = 0;
+    return true;
+}
+
+bool DSKSFzProcessor::selectDSPreset(int presetIndex)
+{
+    if (presetIndex < 0 || presetIndex >= (int)dsPresetList.size())
+        return false;
+
+    isLoadingInstrument.store(true, std::memory_order_release);
+    juce::Thread::sleep(30);
+    allNotesOff();
+
+    const bool ok = loadDecentSamplerPreset(dsPresetList[(size_t)presetIndex]);
+    if (ok) dsCurrentPresetIndex = presetIndex;
+
+    isLoadingInstrument.store(false, std::memory_order_release);
+    return ok;
+}
+
 void DSKSFzProcessor::getStateInformation(juce::MemoryBlock& dest)
 {
     auto state = params.copyState();
     state.setProperty("sfzPath", currentSFZFile.getFullPathName(), nullptr);
     if (currentFormat == InstrumentFormat::SF2)
         state.setProperty("sf2PresetIndex", sf2synth.getCurrentPresetIndex(), nullptr);
+    if (currentFormat == InstrumentFormat::DecentSampler)
+        state.setProperty("dsPresetIndex", dsCurrentPresetIndex, nullptr);
 
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, dest);
@@ -327,6 +410,10 @@ void DSKSFzProcessor::setStateInformation(const void* data, int size)
             int presetIndex = state.getProperty("sf2PresetIndex", -1);
             if (currentFormat == InstrumentFormat::SF2 && presetIndex >= 0)
                 selectSF2Preset(presetIndex);
+
+            int dsPresetIndex = state.getProperty("dsPresetIndex", -1);
+            if (currentFormat == InstrumentFormat::DecentSampler && dsPresetIndex >= 0)
+                selectDSPreset(dsPresetIndex);
         }
     }
 }

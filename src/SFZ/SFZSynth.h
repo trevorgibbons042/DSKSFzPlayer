@@ -156,6 +156,13 @@ public:
     // Devuelve true si el instrumento se cargó correctamente
     bool loadSFZ(const juce::File& sfzFile,
                  std::function<void(float)> progressCallback = nullptr);
+
+    // Carga regiones ya parseadas por otro formato (p.ej. Decent Sampler),
+    // reutilizando todo el motor de voces/RR/crossfade/ADSR/filtro tal cual.
+    bool loadRegions(std::vector<SFZRegion> preParsedRegions,
+                      const juce::File& baseDir,
+                      const juce::String& displayName,
+                      std::function<void(float)> progressCallback = nullptr);
     void unload();
 
     // ── Preparación ───────────────────────────────────────────────────────────

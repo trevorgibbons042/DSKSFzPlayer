@@ -400,21 +400,35 @@ bool SFZSynth::loadSFZ(const juce::File& sfzFile,
                         std::function<void(float)> progressCallback)
 {
     unload();
-    instrumentName = sfzFile.getFileNameWithoutExtension();
-    sfzBaseDir     = sfzFile.getParentDirectory();
 
+    std::vector<SFZRegion> parsed;
     SFZParser parser;
-    if (!parser.parse(sfzFile, regions))
+    if (!parser.parse(sfzFile, parsed))
     {
         lastError = "Could not parse the SFZ file: " + sfzFile.getFullPathName();
         return false;
     }
 
-    if (regions.empty())
+    return loadRegions(std::move(parsed), sfzFile.getParentDirectory(),
+                        sfzFile.getFileNameWithoutExtension(), progressCallback);
+}
+
+bool SFZSynth::loadRegions(std::vector<SFZRegion> preParsedRegions,
+                            const juce::File& baseDir,
+                            const juce::String& displayName,
+                            std::function<void(float)> progressCallback)
+{
+    unload();
+
+    if (preParsedRegions.empty())
     {
-        lastError = "The SFZ file does not contain valid regions.";
+        lastError = "The instrument does not contain valid regions.";
         return false;
     }
+
+    regions        = std::move(preParsedRegions);
+    sfzBaseDir     = baseDir;
+    instrumentName = displayName;
 
     loadSampleFiles(progressCallback);
     loaded = true;

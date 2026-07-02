@@ -204,9 +204,10 @@ void LibraryTreeItem::populateChildren()
         {
             // Escanear si hay algún archivo jugable dentro de esta carpeta (o sus subcarpetas)
             juce::Array<juce::File> playableFiles;
-            child.findChildFiles(playableFiles, juce::File::findFiles, true, "*.sfz;*.sf2;*.zip;*.SFZ;*.SF2;*.ZIP");
+            child.findChildFiles(playableFiles, juce::File::findFiles, true,
+                "*.sfz;*.sf2;*.zip;*.dspreset;*.dslibrary;*.SFZ;*.SF2;*.ZIP;*.DSPRESET;*.DSLIBRARY");
 
-            // Solo mostramos la carpeta si tiene al menos un SFZ o ZIP dentro
+            // Solo mostramos la carpeta si tiene al menos un archivo jugable dentro
             if (!playableFiles.isEmpty())
             {
                 auto* item = new LibraryTreeItem(Type::SubFolder, child);
@@ -219,10 +220,14 @@ void LibraryTreeItem::populateChildren()
         else
         {
             juce::String ext = child.getFileExtension().toLowerCase();
-            if (ext == ".sfz" || ext == ".sf2" || ext == ".zip")
+            if (ext == ".sfz" || ext == ".sf2" || ext == ".zip" || ext == ".dspreset" || ext == ".dslibrary")
             {
-                auto* item = new LibraryTreeItem(
-                    ext == ".sfz" ? Type::SFZFile : (ext == ".sf2" ? Type::SF2File : Type::ZIPFile), child);
+                Type childType = ext == ".sfz"       ? Type::SFZFile
+                                : ext == ".sf2"       ? Type::SF2File
+                                : ext == ".dspreset"  ? Type::DSFile
+                                : ext == ".dslibrary" ? Type::DSLibFile
+                                :                        Type::ZIPFile;
+                auto* item = new LibraryTreeItem(childType, child);
                 item->onFileActivated = onFileActivated;
                 item->onSFZRightClicked = onSFZRightClicked;
                 item->onSFZPreview = onSFZPreview;
@@ -246,6 +251,8 @@ void LibraryTreeItem::paintItem(juce::Graphics& g, int w, int h)
     case Type::SFZFile:    icon = "[S]"; col = t.accent2;  break;
     case Type::SF2File:    icon = "[2]"; col = t.favAmber; break;
     case Type::ZIPFile:    icon = "[Z]"; col = t.accent;   break;
+    case Type::DSFile:     icon = "[D]"; col = t.favGold;  break;
+    case Type::DSLibFile:  icon = "[L]"; col = t.favGold;  break;
     }
 
     g.setColour(col);
@@ -267,13 +274,15 @@ void LibraryTreeItem::itemDoubleClicked(const juce::MouseEvent&)
 
 void LibraryTreeItem::itemClicked(const juce::MouseEvent& e)
 {
+    const bool isFavoritable = type == Type::SFZFile || type == Type::SF2File
+                             || type == Type::DSFile  || type == Type::DSLibFile;
     if (e.mods.isRightButtonDown())
     {
-        if ((type == Type::SFZFile || type == Type::SF2File) && onSFZRightClicked)
+        if (isFavoritable && onSFZRightClicked)
             onSFZRightClicked(file, e);
         return;
     }
-    if ((type == Type::SFZFile || type == Type::SF2File) && e.x < 28 && onSFZPreview)
+    if (isFavoritable && e.x < 28 && onSFZPreview)
         onSFZPreview(file);
 }
 
@@ -1073,7 +1082,7 @@ void LibraryPanel::runSearch(const juce::String& query)
         juce::File folder(path);
         if (!folder.isDirectory()) continue;
         juce::Array<juce::File> found;
-        folder.findChildFiles(found, juce::File::findFiles, true, "*.sfz;*.sf2");
+        folder.findChildFiles(found, juce::File::findFiles, true, "*.sfz;*.sf2;*.dspreset;*.dslibrary");
         for (auto& f : found)
         {
             if (f.getFileNameWithoutExtension().toLowerCase().contains(lq) ||

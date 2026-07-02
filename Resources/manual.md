@@ -8,15 +8,20 @@ Version 1.0 · DSK Music · www.dskmusic.com
 
 ## Overview
 
-DSK SFz Player is a 64-voice polyphonic SFZ/SF2 sampler available as a VST3 plugin and as a
-standalone application. Load any SFZ or SF2 (SoundFont2) instrument and play it with full MIDI
-control, five effects, and real-time parameter automation.
+DSK SFz Player is a 64-voice polyphonic SFZ/SF2/Decent Sampler sampler available as a VST3 plugin
+and as a standalone application. Load any SFZ, SF2 (SoundFont2) or Decent Sampler (.dspreset /
+.dslibrary) instrument and play it with full MIDI control, five effects, and real-time parameter
+automation.
 
-Supported audio formats inside SFZ libraries: WAV, FLAC, OGG. SF2 (SoundFont2) files are also
-supported directly. Note: for SF2 instruments, the Amp ADSR and Filter/Mod (LFO) sections replace
-the soundfont's own built-in envelope and filter with the plugin's knobs (same behaviour as SFZ).
-The Amp ADSR is applied per note; Filter and Mod are applied to the mixed output rather than per
-voice, since the SF2 engine renders all voices already mixed together.
+Supported audio formats inside SFZ/Decent Sampler libraries: WAV, FLAC, OGG. SF2 (SoundFont2)
+files are also supported directly. Note: for SF2 instruments, the Amp ADSR and Filter/Mod (LFO)
+sections replace the soundfont's own built-in envelope and filter with the plugin's knobs (same
+behaviour as SFZ). The Amp ADSR is applied per note; Filter and Mod are applied to the mixed
+output rather than per voice, since the SF2 engine renders all voices already mixed together.
+Decent Sampler (.dspreset/.dslibrary) instruments are parsed into the same engine SFZ uses, so
+every plugin control (ADSR, filter, LFOs, effects, round robin, crossfades) works exactly as with
+SFZ; the preset's own `<effects>` and `<ui>` blocks are not imported, since the plugin always uses
+its own fixed UI and effects chain regardless of format (same approach as with SF2).
 
 ---
 
@@ -24,35 +29,40 @@ voice, since the SF2 engine renders all voices already mixed together.
 
 ### A  Drag & Drop (onto the plugin window)
 
-| What you drop         | Result                                                          |
-|-----------------------|-----------------------------------------------------------------|
-| .sfz or .sf2 file     | Instrument loads immediately                                    |
-| Folder with SFZ/SF2   | Folder is added to the Library panel                           |
-| .zip pack             | You choose a destination, it extracts, then shows in Library   |
+| What you drop                        | Result                                                          |
+|---------------------------------------|-----------------------------------------------------------------|
+| .sfz, .sf2 or .dspreset file          | Instrument loads immediately                                    |
+| .dslibrary pack                       | Extracted internally and loaded (no destination prompt); if it contains several presets, a picker appears |
+| Folder with SFZ/SF2/Decent Sampler    | Folder is added to the Library panel                           |
+| .zip pack                             | You choose a destination, it extracts, then shows in Library   |
 
-Only one SFZ/SF2 and one ZIP are loaded per drop; all dragged folders are added.
+Only one instrument file (SFZ/SF2/.dspreset/.dslibrary) and one generic ZIP are loaded per drop;
+all dragged folders are added.
 
 ### B  Open Button
 
-Click **Open SFZ/SF2/ZIP** (top-right of the main panel) to browse for .sfz, .sf2, or .zip files.
+Click **Open SFZ/SF2/Decent Sampler/ZIP** (top-right of the main panel) to browse for .sfz, .sf2,
+.dspreset, .dslibrary, or .zip files.
 
 ### C  Library Tree
 
-Double-click any .sfz or .sf2 entry in the Library tree on the left.
+Double-click any .sfz, .sf2, .dspreset or .dslibrary entry in the Library tree on the left.
 
-If the SF2 file contains more than one bank/preset, a picker menu appears automatically after
-loading — the same picker can be reopened at any time by clicking the instrument name shown in
-the header (a small **▾** appears next to the name when a picker is available).
+If the SF2 file contains more than one bank/preset, or the .dslibrary pack contains more than one
+.dspreset, a picker menu appears automatically after loading — the same picker can be reopened at
+any time by clicking the instrument name shown in the header (a small **[+]** appears next to the
+name when a picker is available).
 
 ---
 
 ## Library Panel  (left column)
 
-The Library organises your SFZ/SF2 collections in a folder tree.
+The Library organises your SFZ/SF2/Decent Sampler collections in a folder tree.
 
 ### Adding a folder
 Click **+** at the top of the panel and select a directory.
-All .sfz, .sf2, and .zip files found inside (including subfolders) appear in the tree.
+All .sfz, .sf2, .dspreset, .dslibrary, and .zip files found inside (including subfolders) appear
+in the tree.
 
 ### Removing a folder
 Select a root folder in the tree and click **−**.
@@ -64,7 +74,7 @@ Click **+/−** to toggle all library root folders open or closed.
 Type in the search box to filter instruments by name or path across all library folders.
 Press **X** to clear the search and return to the tree view.
 
-### Right-click on an SFZ or SF2 file
+### Right-click on an SFZ, SF2, .dspreset or .dslibrary file
 Opens a context menu with **Add to Favorites** (see Favorites section below).
 
 ---
@@ -76,7 +86,8 @@ It lets you pin the instruments you use most often.
 
 ### Adding an instrument to Favorites
 
-Right-click any .sfz file in the library tree → **Add to Favorites**, then choose:
+Right-click any .sfz, .sf2, .dspreset or .dslibrary file in the library tree → **Add to
+Favorites**, then choose:
 
 - **★ Favorites (no folder)** — pinned at the root level, no subfolder required
 - An existing Favorites folder name — adds it there
@@ -249,17 +260,21 @@ The existing library and favorites are completely replaced by the imported data.
 
 ## Descripción general
 
-DSK SFz Player es un sampler SFZ/SF2 polifónico de 64 voces disponible como plugin VST3 y como
-aplicación independiente (Standalone). Carga cualquier instrumento en formato SFZ o SF2
-(SoundFont2) y tócalo con control MIDI completo, cinco efectos y automatización de parámetros
-en tiempo real.
+DSK SFz Player es un sampler SFZ/SF2/Decent Sampler polifónico de 64 voces disponible como plugin
+VST3 y como aplicación independiente (Standalone). Carga cualquier instrumento en formato SFZ,
+SF2 (SoundFont2) o Decent Sampler (.dspreset / .dslibrary) y tócalo con control MIDI completo,
+cinco efectos y automatización de parámetros en tiempo real.
 
-Formatos de audio compatibles dentro de las librerías SFZ: WAV, FLAC, OGG. Los archivos SF2
-(SoundFont2) también son compatibles directamente. Nota: en instrumentos SF2, las secciones Amp
-ADSR y Filter/Mod (LFO) sustituyen la envolvente y el filtro propios del soundfont por los knobs
-del plugin (mismo comportamiento que en SFZ). El ADSR de amplitud se aplica por nota; el Filtro y
-el Mod se aplican sobre la mezcla final en vez de por voz, ya que el motor SF2 renderiza todas las
-voces ya mezcladas.
+Formatos de audio compatibles dentro de las librerías SFZ/Decent Sampler: WAV, FLAC, OGG. Los
+archivos SF2 (SoundFont2) también son compatibles directamente. Nota: en instrumentos SF2, las
+secciones Amp ADSR y Filter/Mod (LFO) sustituyen la envolvente y el filtro propios del soundfont
+por los knobs del plugin (mismo comportamiento que en SFZ). El ADSR de amplitud se aplica por
+nota; el Filtro y el Mod se aplican sobre la mezcla final en vez de por voz, ya que el motor SF2
+renderiza todas las voces ya mezcladas. Los instrumentos Decent Sampler (.dspreset/.dslibrary) se
+convierten al mismo motor que usa SFZ, por lo que todos los controles del plugin (ADSR, filtro,
+LFOs, efectos, round robin, crossfades) funcionan exactamente igual que con SFZ; los bloques
+`<effects>` y `<ui>` propios del preset no se importan, ya que el plugin siempre usa su propia
+interfaz y cadena de efectos fija, independientemente del formato (mismo criterio que con SF2).
 
 ---
 
@@ -267,36 +282,41 @@ voces ya mezcladas.
 
 ### A  Arrastrar y soltar (sobre la ventana del plugin)
 
-| Qué arrastras            | Resultado                                                              |
-|---------------------------|------------------------------------------------------------------------|
-| Archivo .sfz o .sf2       | El instrumento se carga inmediatamente                                 |
-| Carpeta con SFZ/SF2       | La carpeta se añade al panel de Librería                              |
-| Pack .zip                 | Eliges dónde extraer, se descomprime y aparece en la Librería         |
+| Qué arrastras                        | Resultado                                                              |
+|----------------------------------------|--------------------------------------------------------------------------|
+| Archivo .sfz, .sf2 o .dspreset        | El instrumento se carga inmediatamente                                 |
+| Pack .dslibrary                       | Se extrae internamente y se carga (sin preguntar destino); si trae varios presets aparece un selector |
+| Carpeta con SFZ/SF2/Decent Sampler    | La carpeta se añade al panel de Librería                              |
+| Pack .zip                             | Eliges dónde extraer, se descomprime y aparece en la Librería         |
 
-Solo se carga un SFZ/SF2 y un ZIP por soltar; todas las carpetas arrastradas se añaden.
+Solo se carga un archivo de instrumento (SFZ/SF2/.dspreset/.dslibrary) y un ZIP genérico por
+soltar; todas las carpetas arrastradas se añaden.
 
 ### B  Botón Open
 
-Haz clic en **Open SFZ/SF2/ZIP** (arriba a la derecha) para buscar archivos .sfz, .sf2 o .zip.
+Haz clic en **Open SFZ/SF2/Decent Sampler/ZIP** (arriba a la derecha) para buscar archivos .sfz,
+.sf2, .dspreset, .dslibrary o .zip.
 
 ### C  Árbol de Librería
 
-Haz doble clic en cualquier entrada .sfz o .sf2 del árbol de la Librería (columna izquierda).
+Haz doble clic en cualquier entrada .sfz, .sf2, .dspreset o .dslibrary del árbol de la Librería
+(columna izquierda).
 
-Si el archivo SF2 contiene más de un banco/preset, aparece automáticamente un menú selector
-tras la carga — el mismo selector puede volver a abrirse en cualquier momento haciendo clic en
-el nombre del instrumento mostrado en el encabezado (aparece un pequeño **▾** junto al nombre
-cuando el selector está disponible).
+Si el archivo SF2 contiene más de un banco/preset, o el pack .dslibrary contiene más de un
+.dspreset, aparece automáticamente un menú selector tras la carga — el mismo selector puede
+volver a abrirse en cualquier momento haciendo clic en el nombre del instrumento mostrado en el
+encabezado (aparece un pequeño **[+]** junto al nombre cuando el selector está disponible).
 
 ---
 
 ## Panel de Librería  (columna izquierda)
 
-La Librería organiza tus colecciones SFZ/SF2 en un árbol de carpetas.
+La Librería organiza tus colecciones SFZ/SF2/Decent Sampler en un árbol de carpetas.
 
 ### Añadir una carpeta
 Haz clic en **+** en la parte superior del panel y selecciona un directorio.
-Todos los archivos .sfz, .sf2 y .zip que contenga (incluyendo subcarpetas) aparecerán en el árbol.
+Todos los archivos .sfz, .sf2, .dspreset, .dslibrary y .zip que contenga (incluyendo subcarpetas)
+aparecerán en el árbol.
 
 ### Eliminar una carpeta
 Selecciona una carpeta raíz en el árbol y haz clic en **−**.
@@ -308,7 +328,7 @@ Haz clic en **+/−** para abrir o cerrar todas las carpetas raíz de la librer�
 Escribe en el cuadro de búsqueda para filtrar instrumentos por nombre o ruta.
 Pulsa **X** para limpiar la búsqueda y volver a la vista de árbol.
 
-### Clic derecho en un archivo SFZ o SF2
+### Clic derecho en un archivo SFZ, SF2, .dspreset o .dslibrary
 Abre un menú contextual con **Add to Favorites** (ver sección de Favoritos).
 
 ---
@@ -320,7 +340,8 @@ Permite fijar los instrumentos que más uses.
 
 ### Añadir un instrumento a Favoritos
 
-Haz clic derecho en cualquier archivo .sfz → **Add to Favorites**, luego elige:
+Haz clic derecho en cualquier archivo .sfz, .sf2, .dspreset o .dslibrary → **Add to Favorites**,
+luego elige:
 
 - **★ Favorites (no folder)** — se fija en el nivel raíz, sin necesidad de subcarpeta
 - El nombre de una carpeta de Favoritos existente — se añade allí

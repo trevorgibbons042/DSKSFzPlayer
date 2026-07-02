@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "PluginEditor.h"
 #include "UI/SF2PresetPicker.h"
+#include "UI/DSPresetPicker.h"
 
 // ── Help dialog ───────────────────────────────────────────────────────────────
 class HelpDialog : public juce::Component
@@ -350,12 +351,12 @@ void DSKSFzEditor::buildUI()
 
     openBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF0F3460));
     openBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xFF00D4FF));
-    openBtn.setTooltip("Open an SFZ or SF2 file, or a ZIP instrument pack");
+    openBtn.setTooltip("Open an SFZ, SF2 or Decent Sampler file, or a ZIP instrument pack");
     openBtn.onClick = [this]()
     {
         fileChooser = std::make_unique<juce::FileChooser>(
-            "Open SFZ/SF2 instrument", proc.getCurrentSFZFile().getParentDirectory(),
-            "*.sfz;*.SFZ;*.sf2;*.SF2;*.zip;*.ZIP");
+            "Open SFZ/SF2/Decent Sampler instrument", proc.getCurrentSFZFile().getParentDirectory(),
+            "*.sfz;*.SFZ;*.sf2;*.SF2;*.dspreset;*.DSPRESET;*.dslibrary;*.DSLIBRARY;*.zip;*.ZIP");
         fileChooser->launchAsync(
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [this](const juce::FileChooser& fc)
@@ -925,7 +926,9 @@ void DSKSFzEditor::timerCallback()
 {
     auto sfz = proc.getCurrentSFZFile();
     const bool sf2Mode = proc.isSF2Loaded();
-    const bool hasPresetChoice = sf2Mode && proc.getSF2Presets().size() > 1;
+    const bool dsMode  = proc.isDSLoaded();
+    const bool hasPresetChoice = (sf2Mode && proc.getSF2Presets().size() > 1)
+                               || (dsMode  && proc.getDSPresetList().size() > 1);
 
     juce::String name = sfz.existsAsFile() ? sfz.getFileNameWithoutExtension() : "No instrument loaded";
     if (sf2Mode)
@@ -935,9 +938,16 @@ void DSKSFzEditor::timerCallback()
         for (auto& p : presets)
             if (p.index == curIdx) { name += "  -  " + p.name; break; }
     }
+    else if (dsMode)
+    {
+        const auto& presets = proc.getDSPresetList();
+        const int curIdx = proc.getDSCurrentPresetIndex();
+        if (curIdx >= 0 && curIdx < (int)presets.size() && presets.size() > 1)
+            name += "  -  " + presets[(size_t)curIdx].getFileNameWithoutExtension();
+    }
     if (hasPresetChoice) name += "  [+]"; // [+] indica que el nombre es clicable (selector de preset)
     instrNameLabel.setText(name, juce::dontSendNotification);
-    instrNameLabel.setTooltip(hasPresetChoice ? "Click to choose bank/preset" : "");
+    instrNameLabel.setTooltip(hasPresetChoice ? "Click to choose preset" : "");
     instrNameLabel.onClick = hasPresetChoice ? std::function<void()>([this]() { showPresetPicker(); }) : nullptr;
 
     statusLabel.setText(
@@ -1020,7 +1030,7 @@ bool DSKSFzEditor::isInterestedInFileDrag(const juce::StringArray& files)
     for (auto& f : files)
     {
         juce::File file(f);
-        if (file.hasFileExtension("sfz;sf2") || file.hasFileExtension(".zip") || file.isDirectory())
+        if (file.hasFileExtension("sfz;sf2;dspreset;dslibrary") || file.hasFileExtension(".zip") || file.isDirectory())
             return true;
     }
     return false;
@@ -1053,7 +1063,7 @@ void DSKSFzEditor::filesDropped(const juce::StringArray& files, int, int)
         {
             libraryPanel.addFolderDirect(file);
         }
-        else if (!sfzLoaded && file.hasFileExtension("sfz;sf2"))
+        else if (!sfzLoaded && file.hasFileExtension("sfz;sf2;dspreset;dslibrary"))
         {
             libraryFileRequested(file);
             sfzLoaded = true;
@@ -1197,16 +1207,30 @@ void DSKSFzEditor::onInstrumentLoaded()
 {
     if (proc.isSF2Loaded() && proc.getSF2Presets().size() > 1)
         showPresetPicker();
+    else if (proc.isDSLoaded() && proc.getDSPresetList().size() > 1)
+        showPresetPicker();
 }
 
 void DSKSFzEditor::showPresetPicker()
 {
-    if (!proc.isSF2Loaded()) return;
-    auto& presets = proc.getSF2Presets();
-    if (presets.empty()) return;
+    if (proc.isSF2Loaded())
+    {
+        auto& presets = proc.getSF2Presets();
+        if (presets.empty()) return;
 
-    auto picker = std::make_unique<SF2PresetPicker>(presets, proc.getSF2CurrentPresetIndex());
-    picker->onPresetChosen = [this](int presetIndex) { proc.selectSF2Preset(presetIndex); };
+        auto picker = std::make_unique<SF2PresetPicker>(presets, proc.getSF2CurrentPresetIndex());
+        picker->onPresetChosen = [this](int presetIndex) { proc.selectSF2Preset(presetIndex); };
 
-    juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
+        juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
+    }
+    else if (proc.isDSLoaded())
+    {
+        auto& presets = proc.getDSPresetList();
+        if (presets.empty()) return;
+
+        auto picker = std::make_unique<DSPresetPicker>(presets, proc.getDSCurrentPresetIndex());
+        picker->onPresetChosen = [this](int presetIndex) { proc.selectDSPreset(presetIndex); };
+
+        juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
+    }
 }
