@@ -53,7 +53,7 @@ private:
 };
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-static constexpr int LIB_W = 220;
+static constexpr int LIB_W = 260;
 static constexpr int HDR_H = 48;
 static constexpr int KSZ = 42;
 static constexpr int KSLOT = 52;
@@ -63,6 +63,9 @@ static constexpr int FTR_H = 30;
 static constexpr int KB_H = 56;
 static constexpr int VDIV_H = 6; // Altura del tirador horizontal
 static constexpr int DEF_H = HDR_H + 3 * ROW_H + FTR_H + VDIV_H + KB_H;
+// Alto de arranque por defecto: un poco más alto que el mínimo compacto (DEF_H)
+// para dar más espacio vertical a la Librería al abrir el plugin por primera vez.
+static constexpr int DEF_STARTUP_H = DEF_H + 90;
 
 static int colX(int rx, int col) { return rx + 8 + col * KSLOT; }
 
@@ -127,14 +130,14 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
 {
     setLookAndFeel(&lf);
 
-    pluginHeight = DEF_H;
+    pluginHeight = DEF_STARTUP_H;
 
     // Restore saved theme before buildUI so colours are applied immediately
     if (auto* s = proc.getAppProperties().getUserSettings())
     {
         lf.setTheme(s->getIntValue("uiTheme", 0));
-        libWidth = juce::jlimit(120, 450, s->getIntValue("libWidth", 220));
-        pluginHeight = juce::jlimit(DEF_H, 1200, s->getIntValue("pluginHeight", DEF_H));
+        libWidth = juce::jlimit(120, 450, s->getIntValue("libWidth", LIB_W));
+        pluginHeight = juce::jlimit(DEF_H, 1200, s->getIntValue("pluginHeight", DEF_STARTUP_H));
         libraryPanel.loadState(*s);
     }
 
@@ -435,7 +438,7 @@ void DSKSFzEditor::buildUI()
 
                                 // 2. Restaurar las dimensiones por defecto de la interfaz
                                 libWidth = LIB_W;
-                                pluginHeight = DEF_H;
+                                pluginHeight = DEF_STARTUP_H;
                                 setSize(libWidth + 780, pluginHeight);
                                 applyWindowConstraints();
                             }
@@ -1097,7 +1100,7 @@ void DSKSFzEditor::mouseDown(const juce::MouseEvent& e)
     if (e.getNumberOfClicks() >= 2)
     {
         if (nearV) libWidth = LIB_W;
-        if (nearH) pluginHeight = DEF_H;
+        if (nearH) pluginHeight = DEF_STARTUP_H;
 
         setSize(libWidth + 780, pluginHeight);
         applyWindowConstraints();

@@ -756,6 +756,7 @@ LibraryPanel::LibraryPanel()
 
     treeView.setColour(juce::TreeView::backgroundColourId, juce::Colour(0xFF0D1B35));
     treeView.setRootItemVisible(false);
+    treeView.setIndentSize(12); // menos sangrado por nivel (por defecto JUCE usa ~24px)
     addAndMakeVisible(treeView);
 
     searchResultsList.setModel(&searchModel);
