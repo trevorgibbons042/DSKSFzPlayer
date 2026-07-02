@@ -762,6 +762,7 @@ LibraryPanel::LibraryPanel()
 
     bannerImage = juce::ImageCache::getFromMemory(BinaryData::banner_png,
         BinaryData::banner_pngSize);
+    RemoteBanner::trackImpressionAsync();
 
     fetchRemoteBanner();
 

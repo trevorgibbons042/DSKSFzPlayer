@@ -25,4 +25,9 @@ namespace RemoteBanner
     // servidor para estadísticas. Lanza su propio hilo interno y no requiere
     // ningún callback ni gestión de resultado por parte del llamador.
     void trackClickAsync(const juce::String& destinationUrl);
+
+    // Igual que trackClickAsync, pero para registrar que el banner se ha
+    // mostrado al usuario (permite calcular el CTR = clicks / impresiones
+    // en el dashboard). Llamar como mucho una vez por instancia del plugin.
+    void trackImpressionAsync();
 }

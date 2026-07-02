@@ -5,6 +5,10 @@ namespace RemoteBanner
     static const char* kBannerConfigUrl = "https://www.dskmusic.com/downloads/ads/dsksfzplayer/banner.json";
     static const char* kTrackUrl        = "https://www.dskmusic.com/downloads/ads/dsksfzplayer/track.php";
 
+    // Debe coincidir exactamente con TRACK_SECRET en .servidor/public/config.php;
+    // si se rota uno hay que rotar el otro a la vez.
+    static const char* kTrackSecret = "754627f0b8d92257dde112bff1a5148eea967c277c682730";
+
     Result fetchBlocking()
     {
         Result result;
@@ -45,15 +49,47 @@ namespace RemoteBanner
         return result;
     }
 
-    void trackClickAsync(const juce::String& destinationUrl)
+    // Identificador anónimo persistente por instalación (no ligado a cuenta ni
+    // dato personal alguno): permite al dashboard contar usuarios únicos reales,
+    // más fiable que agrupar por IP (que cambia con conexiones dinámicas/móviles).
+    // Se genera una vez y se guarda en un fichero de texto junto a los ajustes
+    // de la app; si no se puede leer/escribir, simplemente se envía vacío.
+    static juce::String getOrCreateInstallId()
     {
-        juce::Thread::launch([destinationUrl]
+        auto dir  = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                        .getChildFile("DSK SFz player");
+        auto file = dir.getChildFile("install_id.txt");
+
+        auto existing = file.loadFileAsString().trim();
+        if (existing.isNotEmpty())
+            return existing;
+
+        auto newId = juce::Uuid().toString();
+        if (dir.createDirectory())
+            file.replaceWithText(newId);
+        return newId;
+    }
+
+    // Construye y envía la petición GET "fire-and-forget" común a clicks e
+    // impresiones. Todo (incluida la lectura/escritura del install id) ocurre
+    // en el hilo lanzado aquí, nunca en el hilo llamante.
+    static void sendTrackingEvent(const juce::String& event, const juce::String& destinationUrl)
+    {
+        juce::Thread::launch([event, destinationUrl]
         {
             auto url = juce::URL(kTrackUrl)
-                           .withParameter("url",  destinationUrl)
-                           .withParameter("os",   juce::SystemStats::getOperatingSystemName())
-                           .withParameter("ver",  ProjectInfo::versionString)
-                           .withParameter("lang", juce::SystemStats::getUserLanguage());
+                           .withParameter("key",   kTrackSecret)
+                           .withParameter("event", event)
+                           .withParameter("os",    juce::SystemStats::getOperatingSystemName())
+                           .withParameter("ver",   ProjectInfo::versionString)
+                           .withParameter("lang",  juce::SystemStats::getUserLanguage())
+                           .withParameter("daw",   juce::PluginHostType().getHostDescription())
+                           .withParameter("fmt",   juce::AudioProcessor::getWrapperTypeDescription(
+                                                        juce::PluginHostType::getPluginLoadedAs()))
+                           .withParameter("iid",   getOrCreateInstallId());
+
+            if (destinationUrl.isNotEmpty())
+                url = url.withParameter("url", destinationUrl);
 
             auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
                                .withConnectionTimeoutMs(3000);
@@ -63,5 +99,15 @@ namespace RemoteBanner
             if (stream != nullptr)
                 stream->readEntireStreamAsString();
         });
+    }
+
+    void trackClickAsync(const juce::String& destinationUrl)
+    {
+        sendTrackingEvent("click", destinationUrl);
+    }
+
+    void trackImpressionAsync()
+    {
+        sendTrackingEvent("impression", {});
     }
 }
