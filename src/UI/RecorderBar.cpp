@@ -109,7 +109,6 @@ RecorderBar::RecorderBar(DSKSFzProcessor& processor) : proc(processor)
     timeLabel.setText("00:00", juce::dontSendNotification);
     addAndMakeVisible(timeLabel);
 
-    destinationFolder = {};
     if (auto* s = proc.getAppProperties().getUserSettings())
     {
         auto saved = s->getValue(kRecordFolderKey, juce::String());
