@@ -65,7 +65,9 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Comprimir artefactos
-        run: zip -r DSK_SFz_player_macos.zip build/DSKSFzPlayer_artefacts/Release/*
+        run: |
+          cd build/DSKSFzPlayer_artefacts/Release
+          zip -r ../../../DSK_SFz_player_macos.zip Standalone VST3
       - name: Subir artefactos macOS
         uses: actions/upload-artifact@v4
         with:
@@ -85,7 +87,9 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Comprimir artefactos
-        run: zip -r DSK_SFz_player_linux.zip build/DSKSFzPlayer_artefacts/Release/*
+        run: |
+          cd build/DSKSFzPlayer_artefacts/Release
+          zip -r ../../../DSK_SFz_player_linux.zip Standalone VST3
       - name: Subir artefactos Linux
         uses: actions/upload-artifact@v4
         with:
