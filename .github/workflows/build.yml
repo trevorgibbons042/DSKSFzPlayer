@@ -47,7 +47,12 @@ jobs:
           cmake --build build --config Release
       - name: Comprimir artefactos
         shell: powershell
-        run: Compress-Archive -Path build/DSKSFzPlayer_artefacts/Release/* -DestinationPath DSK_SFz_player_windows.zip
+        run: |
+          $release = "build/DSKSFzPlayer_artefacts/Release"
+          Remove-Item -Path "$release/*_SharedCode.lib" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$release/VST3/*.exp" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$release/VST3/*.lib" -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$release/Standalone", "$release/VST3" -DestinationPath DSK_SFz_player_windows.zip
       - name: Subir artefactos Windows
         uses: actions/upload-artifact@v4
         with:
