@@ -401,6 +401,8 @@ void DSKSFzEditor::buildUI()
         menu.addSeparator();
         menu.addItem(3, "Reset all parameters");
         menu.addSeparator();
+        menu.addItem(6, "Edit Instrument...", canEditCurrentInstrument());
+        menu.addSeparator();
         menu.addItem(10, "Export config...");
         menu.addItem(11, "Import config...");
         menu.addSeparator();
@@ -447,6 +449,10 @@ void DSKSFzEditor::buildUI()
                                 applyWindowConstraints();
                             }
                         });
+                }
+                else if (r == 6)
+                {
+                    openInstrumentEditor();
                 }
                 else if (r == 10)
                 {
@@ -1265,4 +1271,141 @@ void DSKSFzEditor::showPresetPicker()
 
         juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
     }
+}
+
+// ── Instrument text editor (Options > Edit Instrument...) ───────────────────
+// Only plain-text formats can be edited this way: SFZ files and Decent
+// Sampler's XML .dspreset (including one extracted from a .dslibrary — the
+// currently loaded file always points at a real file on disk, see
+// DSKSFzProcessor::getCurrentSFZFile()). SF2 is a binary format and is
+// excluded.
+bool DSKSFzEditor::canEditCurrentInstrument() const
+{
+    const auto fmt = proc.getCurrentFormat();
+    return proc.getCurrentSFZFile().existsAsFile()
+        && (fmt == InstrumentFormat::SFZ || fmt == InstrumentFormat::DecentSampler);
+}
+
+void DSKSFzEditor::openInstrumentEditor()
+{
+    if (instrumentEditorWindow != nullptr)
+    {
+        instrumentEditorWindow->toFront(true);
+        return;
+    }
+
+    if (!canEditCurrentInstrument())
+        return;
+
+    instrumentEditorFile = proc.getCurrentSFZFile();
+    instrumentEditorDirty = false;
+
+    instrumentEditorWindow = std::make_unique<InstrumentEditorWindow>(instrumentEditorFile);
+
+    instrumentEditorWindow->onTextChanged = [this]()
+    {
+        if (!instrumentEditorDirty)
+        {
+            instrumentEditorDirty = true;
+            if (instrumentEditorWindow != nullptr)
+                instrumentEditorWindow->setDirtyIndicator(true);
+        }
+    };
+
+    instrumentEditorWindow->onSaveClicked = [this]() { saveInstrumentEditorContents(); };
+
+    instrumentEditorWindow->onCloseRequested = [this](std::function<void(bool)> onResolved)
+    {
+        requestCloseInstrumentEditor(std::move(onResolved));
+    };
+}
+
+bool DSKSFzEditor::saveInstrumentEditorContents()
+{
+    if (instrumentEditorWindow == nullptr)
+        return false;
+
+    if (!instrumentEditorFile.replaceWithText(instrumentEditorWindow->getEditorText()))
+    {
+        instrumentEditorWindow->setStatusText("Save failed — check file permissions.");
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Save Failed",
+            "Could not write to \"" + instrumentEditorFile.getFullPathName() + "\".");
+        return false;
+    }
+
+    instrumentEditorDirty = false;
+    instrumentEditorWindow->setDirtyIndicator(false);
+    instrumentEditorWindow->setStatusText("Saved. Reloading instrument...");
+
+    // Reload the instrument so the edits take effect immediately, the same
+    // way any other file load happens (background thread, guarded by
+    // loadGeneration so a newer load always wins).
+    statusLabel.setText("Loading...", juce::dontSendNotification);
+    const int currentGen = ++loadGeneration;
+    auto fileToReload = instrumentEditorFile;
+    juce::Thread::launch([this, fileToReload, currentGen]()
+        {
+            if (currentGen != loadGeneration.load()) return;
+    proc.loadInstrument(fileToReload);
+    juce::MessageManager::callAsync([this, currentGen]()
+        {
+            if (currentGen == loadGeneration.load())
+            {
+                statusLabel.setText("Ready", juce::dontSendNotification);
+                if (instrumentEditorWindow != nullptr)
+                    instrumentEditorWindow->setStatusText("Saved and reloaded.");
+                onInstrumentLoaded();
+            }
+        });
+        });
+
+    return true;
+}
+
+void DSKSFzEditor::requestCloseInstrumentEditor(std::function<void(bool)> onResolved)
+{
+    if (instrumentEditorWindow == nullptr)
+    {
+        if (onResolved) onResolved(true);
+        return;
+    }
+
+    if (!instrumentEditorDirty)
+    {
+        instrumentEditorWindow = nullptr;
+        if (onResolved) onResolved(true);
+        return;
+    }
+
+    auto* box = new juce::AlertWindow("Unsaved Changes",
+        "The instrument file \"" + instrumentEditorFile.getFileName() + "\" has unsaved changes.\n"
+        "Do you want to save them before closing?",
+        juce::AlertWindow::WarningIcon);
+    box->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    box->addButton("Discard", 2);
+    box->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    box->enterModalState(true, juce::ModalCallbackFunction::create([this, onResolved](int result)
+        {
+            if (result == 0) // Cancel: keep the editor window open
+            {
+                if (onResolved) onResolved(false);
+                return;
+            }
+
+            if (result == 1) // Save
+            {
+                if (!saveInstrumentEditorContents())
+                {
+                    // Write failed — keep the window open so nothing is lost.
+                    if (onResolved) onResolved(false);
+                    return;
+                }
+            }
+
+            instrumentEditorDirty = false;
+            instrumentEditorWindow = nullptr;
+            if (onResolved) onResolved(true);
+        }), true);
 }

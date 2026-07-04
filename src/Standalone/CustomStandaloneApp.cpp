@@ -1,8 +1,9 @@
 // Punto de entrada propio de la aplicación Standalone (solo se compila para
 // ese formato — ver JucePlugin_Build_Standalone más abajo). Sustituye a la
 // juce::StandaloneFilterApp por defecto (ver CMakeLists.txt,
-// JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP) únicamente para poder interceptar
-// el botón de cerrar ventana y avisar si hay una grabación MP3 sin guardar.
+// JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP) para poder interceptar el botón de
+// cerrar ventana (avisos de grabación MP3 y de edición de instrumento sin
+// guardar) y para cargar el archivo pasado por Windows vía "Open with".
 #include <juce_core/system/juce_TargetPlatform.h>
 
 #if JucePlugin_Build_Standalone
@@ -10,6 +11,7 @@
 #include <JuceHeader.h>
 #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
 #include "../PluginProcessor.h"
+#include "../PluginEditor.h"
 
 namespace
 {
@@ -21,7 +23,31 @@ class DSKStandaloneWindow : public juce::StandaloneFilterWindow
 public:
     using juce::StandaloneFilterWindow::StandaloneFilterWindow;
 
+    // Cierre solicitado por el botón de la ventana: primero comprobamos si
+    // hay cambios sin guardar en el editor de instrumento (Options > Edit
+    // Instrument...); solo si el usuario decide continuar (guardar o
+    // descartar) pasamos a la comprobación existente de grabación MP3 sin
+    // guardar.
     void closeButtonPressed() override
+    {
+        if (auto* editor = dynamic_cast<DSKSFzEditor*>(getAudioProcessor()->getActiveEditor()))
+        {
+            if (editor->hasUnsavedInstrumentEdits())
+            {
+                editor->requestCloseInstrumentEditor([this](bool proceed)
+                {
+                    if (proceed)
+                        checkUnsavedRecordingThenClose();
+                });
+                return;
+            }
+        }
+
+        checkUnsavedRecordingThenClose();
+    }
+
+private:
+    void checkUnsavedRecordingThenClose()
     {
         if (auto* proc = dynamic_cast<DSKSFzProcessor*>(getAudioProcessor()))
         {
@@ -61,7 +87,6 @@ public:
         finishClosing();
     }
 
-private:
     void finishClosing()
     {
         pluginHolder->savePluginState();
@@ -97,6 +122,8 @@ public:
             juce::LookAndFeel::getDefaultLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId),
             appProperties.getUserSettings(), false, {}, nullptr, {}));
         mainWindow->setVisible(true);
+
+        loadInstrumentFromCommandLine();
     }
 
     void shutdown() override
@@ -116,6 +143,28 @@ public:
     }
 
 private:
+    // Windows "Open with" (o doble clic si el usuario fija manualmente la
+    // asociación) lanza el standalone pasando la ruta del archivo como
+    // argumento de línea de comandos. getCommandLineParameterArray() ya
+    // separa correctamente rutas con espacios (usa CommandLineToArgvW en
+    // Windows), así que no hace falta parsear el string a mano.
+    void loadInstrumentFromCommandLine()
+    {
+        if (mainWindow == nullptr)
+            return;
+
+        for (auto& arg : juce::JUCEApplicationBase::getCommandLineParameterArray())
+        {
+            juce::File f(arg);
+            if (f.existsAsFile() && f.hasFileExtension("sfz;sf2;dspreset;dslibrary"))
+            {
+                if (auto* proc = dynamic_cast<DSKSFzProcessor*>(mainWindow->getAudioProcessor()))
+                    proc->loadInstrument(f);
+                break;
+            }
+        }
+    }
+
     juce::ApplicationProperties appProperties;
     std::unique_ptr<DSKStandaloneWindow> mainWindow;
 };

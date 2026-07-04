@@ -62,6 +62,7 @@ target_sources(DSKSFzPlayer
         src/UI/AudioVisualizer.cpp
         src/UI/RemoteBanner.cpp
         src/UI/RecorderBar.cpp
+        src/UI/InstrumentEditorWindow.cpp
         src/Audio/Mp3Recorder.cpp
         src/Standalone/CustomStandaloneApp.cpp
 )

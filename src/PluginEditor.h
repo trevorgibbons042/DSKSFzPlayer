@@ -5,6 +5,7 @@
 #include "UI/LibraryPanel.h"
 #include "UI/RecorderBar.h"
 #include "UI/AudioVisualizer.h"
+#include "UI/InstrumentEditorWindow.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADSRDisplay — live ADSR envelope visualiser
@@ -49,6 +50,11 @@ public:
     // LibraryPanel::Listener
     void libraryFileRequested(const juce::File& f) override;
     void libraryZipRequested(const juce::File& f) override;
+
+    // Options > Edit Instrument... — used by CustomStandaloneApp to gate the
+    // window close button on unsaved instrument-editor changes.
+    bool hasUnsavedInstrumentEdits() const { return instrumentEditorWindow != nullptr && instrumentEditorDirty; }
+    void requestCloseInstrumentEditor(std::function<void(bool)> onResolved);
 
     // FileDragAndDropTarget
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
@@ -179,6 +185,14 @@ private:
     // SF2 bank/preset selector — PopupMenu, se abre al hacer click en instrNameLabel
     void showPresetPicker();
     void onInstrumentLoaded(); // llamado tras cargar: auto-abre el selector si procede
+
+    // ── Instrument text editor (Options > Edit Instrument...) ───────────────
+    bool canEditCurrentInstrument() const;
+    void openInstrumentEditor();
+    bool saveInstrumentEditorContents(); // returns false (and leaves window open) if the write failed
+    std::unique_ptr<InstrumentEditorWindow> instrumentEditorWindow;
+    juce::File instrumentEditorFile;
+    bool instrumentEditorDirty { false };
 
     // Funciones de detección de tiradores
     bool isNearDivider(int x) const;
