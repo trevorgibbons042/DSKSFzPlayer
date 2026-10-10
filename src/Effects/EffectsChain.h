@@ -1,9 +1,10 @@
 #pragma once
 #include <JuceHeader.h>
+#include "EQBandSettings.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // EffectsChain — Cadena de efectos master en serie
-//   Drive → Chorus → Delay → Reverb → EQ
+//   Drive → Chorus → Phaser → Flanger → Delay → Reverb → EQ
 // Cada efecto tiene bypass y mezcla wet/dry independientes.
 // ══════════════════════════════════════════════════════════════════════════════
 class EffectsChain
@@ -28,6 +29,16 @@ public:
     float chorusMix    = 0.5f;
 
     // ── Delay ─────────────────────────────────────────────────────────────────
+    bool  phaserBypass = true;
+    float phaserRate = 0.5f;
+    float phaserDepth = 0.7f;
+    float phaserMix = 0.5f;
+
+    bool  flangerBypass = true;
+    float flangerRate = 0.25f;
+    float flangerDepth = 0.7f;
+    float flangerMix = 0.5f;
+
     bool  delayBypass    = false;
     float delayTimeMs    = 250.0f; // ms
     float delayFeedback  = 0.35f;  // 0.0-0.95
@@ -47,6 +58,7 @@ public:
     float eqLowFreq = 200.0f;      // Hz
     float eqMidFreq = 1000.0f;
     float eqHighFreq= 4000.0f;
+    std::array<float, 3> eqWidths { 1.0f, 1.0f, 1.0f };
 
 private:
     double currentSampleRate = 44100.0;
@@ -58,6 +70,10 @@ private:
     // ── Chorus ────────────────────────────────────────────────────────────────
     juce::dsp::Chorus<float> chorus;
     bool chorusPrepared = false;
+
+    juce::dsp::Phaser<float> phaser;
+    // Short modulated delay with feedback produces the flanger comb filter.
+    juce::dsp::Chorus<float> flanger;
 
     // ── Delay: línea de retardo con feedback ──────────────────────────────────
     static const int MAX_DELAY_SAMPLES = 192000; // 2 s a 96 kHz
@@ -80,5 +96,6 @@ private:
     void processEQ(juce::AudioBuffer<float>& buf);
 
     // Caché para evitar recalcular EQ en cada bloque
+    EQBandSettings previousBands;
     float prevEqLow = -999.0f, prevEqMid = -999.0f, prevEqHigh = -999.0f;
 };

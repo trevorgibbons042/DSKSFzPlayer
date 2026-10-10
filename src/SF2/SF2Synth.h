@@ -1,4 +1,5 @@
 #pragma once
+#include "../Audio/PerformanceControls.h"
 #include <JuceHeader.h>
 #include <vector>
 #include "../SFZ/SFZSynth.h" // reutiliza SFZADSR / BiquadFilter / LFO / SFZFilterType (DSP sin dependencias de SFZ)
@@ -75,11 +76,15 @@ public:
 
     // LFOs (mismo comportamiento global que en SFZSynth)
     LFO lfo1, lfo2;
+    float glideTime = 0.0f;
+    ModWheelDepth modWheel;
 
     mutable std::atomic<float> meterLevelL { 0.0f };
     mutable std::atomic<float> meterLevelR { 0.0f };
 
 private:
+    std::array<NoteGlide, 64> voiceGlides;
+    int lastGlideVoice = -1, lastGlideNote = -1;
     tsf* font = nullptr;
     bool loaded = false;
     juce::String lastError;

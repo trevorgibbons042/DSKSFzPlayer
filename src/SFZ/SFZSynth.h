@@ -1,4 +1,5 @@
 #pragma once
+#include "../Audio/PerformanceControls.h"
 #include <JuceHeader.h>
 #include "SFZRegion.h"
 
@@ -81,6 +82,7 @@ struct LFO
 class SFZVoice
 {
 public:
+    NoteGlide glide;
     static const int FADE_SAMPLES = 256;   // muestras de fade-out al robar voz
 
     void noteOn (const SFZRegion* region, int note, int velocity,
@@ -175,6 +177,8 @@ public:
     // ── MIDI ──────────────────────────────────────────────────────────────────
     void noteOn (int channel, int note, int velocity);
     void noteOff(int channel, int note, int velocity);
+    int getActiveVoiceCount() const
+    { int count = 0; for (const auto& voice : voices) if (voice.isActive()) ++count; return count; }
     void allNotesOff();
     void pitchBend(int channel, float semitones);  // ±2 semis por defecto
     void controlChange(int channel, int cc, int value);
@@ -205,6 +209,8 @@ public:
 
     // LFOs
     LFO lfo1, lfo2;
+    float glideTime = 0.0f;
+    ModWheelDepth modWheel;
 
     // Número de voces activo
     int maxVoices = 32;
@@ -231,6 +237,9 @@ private:
     std::map<juce::String, std::shared_ptr<juce::AudioBuffer<float>>> sampleCache;
     // Sample rates nativos correspondientes a cada entrada del caché
     std::map<juce::String, double> nativeSRCache;
+
+    SFZVoice* lastGlideVoice = nullptr;
+    int lastGlideNote = -1;
 
     // Pool de voces
     std::array<SFZVoice, MAX_VOICES> voices;

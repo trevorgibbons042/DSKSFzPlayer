@@ -24,13 +24,20 @@ AudioVisualizer::AudioVisualizer()
 
     customizeBtn.setTooltip("Customize the visualizer animation");
     customizeBtn.onClick = [this] { showStyleMenu(); };
+    addChildComponent(eqDisplay);
+    eqDisplay.setInterceptsMouseClicks(true, true);
     addAndMakeVisible(customizeBtn);
 
     ensureSeeded();
     startTimerHz((int)kTimerHz);
 }
 
-AudioVisualizer::~AudioVisualizer() = default;
+AudioVisualizer::~AudioVisualizer()
+{
+    stopTimer();
+    ++*gifGeneration;
+    gifPool.removeAllJobs(true, -1);
+}
 
 void AudioVisualizer::ensureSeeded()
 {
@@ -90,8 +97,8 @@ void AudioVisualizer::ensureSeeded()
 void AudioVisualizer::resized()
 {
     auto r = getLocalBounds();
-    const int bs = 20;
-    customizeBtn.setBounds(r.getRight() - bs - 4, r.getBottom() - bs - 4, bs, bs);
+    customizeBtn.setBounds(r.getRight() - 76, 4, 72, juce::jmin(22, r.getHeight() - 4));
+    eqDisplay.setBounds(r);
     rebuildMatrixColumns();
 }
 
@@ -142,6 +149,8 @@ void AudioVisualizer::setThemeColours(bool isDark, juce::Colour bg, juce::Colour
 void AudioVisualizer::setStyle(int styleIndex)
 {
     style = (Style)juce::jlimit(0, (int)Style::NumStyles - 1, styleIndex);
+    eqDisplay.setVisible(style == Style::EQ);
+    customizeBtn.toFront(false);
     repaint();
 }
 
@@ -158,30 +167,103 @@ juce::String AudioVisualizer::getStyleName(int styleIndex)
         case Style::Orbit:     return "Orbit";
         case Style::Waveform:  return "Waveform";
         case Style::Matrix:    return "Matrix Rain";
+        case Style::EQ:        return "EQ response";
+        case Style::GIF:       return "GIF animation";
         default:                return "Style";
     }
 }
 
+void AudioVisualizer::restoreGifs(const juce::StringArray& paths, const juce::String& selected)
+{
+    gifPaths.clear();
+    for (const auto& path : paths) if (juce::File(path).existsAsFile()) gifPaths.addIfNotAlreadyThere(path);
+    if (juce::File(selected).existsAsFile()) loadGif(juce::File(selected), false);
+}
+
+void AudioVisualizer::loadGif(const juce::File& file, bool showErrors)
+{
+    const auto token = gifGeneration;
+    const int generation = ++*token;
+    juce::Component::SafePointer<AudioVisualizer> safeThis(this);
+    gifPool.addJob([safeThis, token, generation, file, showErrors]
+    {
+        auto decoded = AnimatedGif::read(file, [token, generation] { return token->load() != generation; });
+        if (token->load() != generation) return;
+        juce::MessageManager::callAsync([safeThis, token, generation, file, showErrors, decoded = std::move(decoded)]() mutable
+        {
+            if (!safeThis || token->load() != generation) return;
+            if (decoded.frames.empty())
+            {
+                if (showErrors) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "GIF could not be loaded", decoded.error);
+                return;
+            }
+            safeThis->gif = std::move(decoded);
+            safeThis->gifFrame = 0; safeThis->gifElapsedMs = 0;
+            safeThis->lastGifTick = juce::Time::getMillisecondCounterHiRes();
+            safeThis->gifPath = file.getFullPathName();
+            safeThis->gifPaths.addIfNotAlreadyThere(safeThis->gifPath);
+            if (showErrors) safeThis->setStyle((int) Style::GIF);
+            if (safeThis->onGifLibraryChanged) safeThis->onGifLibraryChanged();
+            if (showErrors && safeThis->onStyleChanged) safeThis->onStyleChanged((int) Style::GIF);
+        });
+    });
+}
+
+void AudioVisualizer::chooseGif()
+{
+    gifChooser = std::make_unique<juce::FileChooser>("Add a GIF to Visuals", juce::File(gifPath), "*.gif");
+    juce::Component::SafePointer<AudioVisualizer> safeThis(this);
+    gifChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [safeThis](const juce::FileChooser& chooser)
+        { if (safeThis && chooser.getResult().existsAsFile()) safeThis->loadGif(chooser.getResult()); });
+}
+
 void AudioVisualizer::showStyleMenu()
 {
-    juce::PopupMenu m;
+    juce::PopupMenu menu, gifs;
     for (int i = 0; i < (int)Style::NumStyles; ++i)
-        m.addItem(i + 1, getStyleName(i), true, i == (int)style);
-
-    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(customizeBtn),
-        [this](int result)
+        menu.addItem(i + 1, getStyleName(i), i != (int) Style::GIF || !gif.frames.empty(), i == (int)style);
+    menu.addSeparator();
+    menu.addItem(1001, "Add GIF...");
+    for (int i = 0; i < gifPaths.size(); ++i)
+        gifs.addItem(2000 + i, juce::File(gifPaths[i]).getFileName(), true, gifPaths[i] == gifPath);
+    if (gifPaths.size() > 0) menu.addSubMenu("My GIFs", gifs);
+    menu.addItem(1002, "Remove current GIF", gifPath.isNotEmpty());
+    juce::Component::SafePointer<AudioVisualizer> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(customizeBtn),
+        [safeThis](int result)
         {
-            if (result <= 0)
-                return;
-            const int idx = result - 1;
-            setStyle(idx);
-            if (onStyleChanged)
-                onStyleChanged(idx);
+            if (!safeThis || result <= 0) return;
+            if (result == 1001) { safeThis->chooseGif(); return; }
+            if (result >= 2000 && result < 2000 + safeThis->gifPaths.size())
+            { safeThis->loadGif(juce::File(safeThis->gifPaths[result - 2000])); return; }
+            if (result == 1002)
+            {
+                ++*safeThis->gifGeneration;
+                safeThis->gifPaths.removeString(safeThis->gifPath);
+                safeThis->gifPath.clear(); safeThis->gif.frames.clear();
+                if (safeThis->onGifLibraryChanged) safeThis->onGifLibraryChanged();
+                result = (int) (safeThis->style == Style::GIF ? Style::Spectrum : safeThis->style) + 1;
+            }
+            const int index = result - 1;
+            safeThis->setStyle(index);
+            if (safeThis->onStyleChanged) safeThis->onStyleChanged(index);
         });
 }
 
 void AudioVisualizer::timerCallback()
 {
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (style == Style::GIF && !gif.frames.empty())
+    {
+        gifElapsedMs += lastGifTick > 0 ? juce::jmin(1000.0, now - lastGifTick) : 0.0;
+        while (gifElapsedMs >= gif.frames[gifFrame].durationMs)
+        {
+            gifElapsedMs -= gif.frames[gifFrame].durationMs;
+            gifFrame = (gifFrame + 1) % gif.frames.size();
+        }
+    }
+    lastGifTick = now;
     const double dt = 1.0 / kTimerHz;
     t += dt;
 
@@ -336,6 +418,15 @@ void AudioVisualizer::paint(juce::Graphics& g)
         case Style::Orbit:     drawOrbit(g, r);      break;
         case Style::Waveform:  drawWaveform(g, r);  break;
         case Style::Matrix:    drawMatrix(g, r);    break;
+        case Style::GIF:
+            if (!gif.frames.empty())
+                g.drawImageWithin(gif.frames[gifFrame].image, 0, 0, getWidth(), getHeight(), juce::RectanglePlacement::centred);
+            else
+            {
+                g.setColour(accentA);
+                g.drawText("Use Visuals to add a GIF", getLocalBounds(), juce::Justification::centred);
+            }
+            break;
         default: break;
     }
 }

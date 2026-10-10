@@ -2,9 +2,12 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "UI/DSKLookAndFeel.h"
+#include "UI/NumericKnob.h"
 #include "UI/LibraryPanel.h"
 #include "UI/RecorderBar.h"
 #include "UI/AudioVisualizer.h"
+#include "UI/StarButton.h"
+#include "UI/EQDisplay.h"
 #include "UI/InstrumentEditorWindow.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -29,12 +32,14 @@ class DSKSFzEditor : public juce::AudioProcessorEditor,
     public juce::Timer
 {
 public:
+    std::function<void(int)> standaloneOption;
     explicit DSKSFzEditor(DSKSFzProcessor& p);
     ~DSKSFzEditor() override;
 
     void paint(juce::Graphics& g) override;
     void paintOverChildren(juce::Graphics& g) override;
     void resized()                   override;
+    void setScaleFactor(float newScale) override;
     void timerCallback()              override;
     void lookAndFeelChanged()         override;
 
@@ -67,16 +72,19 @@ private:
     DSKLookAndFeel   lf;
 
     std::atomic<int> loadGeneration{ 0 };
+    juce::ThreadPool libraryLoadPool { 1 };
+    void loadLibraryInstrument(const juce::File&, int bank = -1, int program = -1);
 
     bool isDragOver{ false };
 
     // Dimensiones y estados de arrastre
     int  libWidth{ 220 };
+    int  pluginWidth{ 1040 };
     int  pluginHeight{ 388 }; // Altura por defecto (se calcula dinámicamente en el cpp)
     bool isDraggingDivider{ false };
     bool isDraggingHDivider{ false };
     int  libWidthAtDragStart{ 220 };
-    int  pluginHeightAtDragStart{ 388 };
+    int  visualHeightAtDragStart{ 90 };
     int  dragStartX{ 0 };
     int  dragStartY{ 0 };
     int  previewCountdown{ 0 };
@@ -88,7 +96,7 @@ private:
     juce::HyperlinkButton titleLink;
     juce::HyperlinkButton siteLink;
 
-    // Label clicable — abre el selector de banco/preset SF2 al pulsar
+    // Click the loaded instrument name to rename it.
     class ClickableLabel : public juce::Label {
     public:
         std::function<void()> onClick;
@@ -97,49 +105,48 @@ private:
             if (isEnabled() && contains(e.getPosition()) && onClick) onClick();
         }
     };
-    ClickableLabel        instrNameLabel;
+    ClickableLabel        instrNameLabel, bankNameLabel;
     juce::Label           statusLabel;
 
-    // Variante del TextButton para poder capturar el evento real del ratón
-    class FavButton : public juce::TextButton {
-    public:
-        FavButton() : juce::TextButton("+") {}
-        std::function<void(const juce::MouseEvent&)> onFavClick;
-        void mouseUp(const juce::MouseEvent& e) override {
-            juce::TextButton::mouseUp(e);
-            if (isEnabled() && contains(e.getPosition()) && onFavClick) onFavClick(e);
-        }
-    };
-    FavButton             addFavBtn;
+    std::array<StarButton, 5> ratingButtons, bankRatingButtons;
+    juce::TextButton categoryButton { "Category" };
+    LibrarySearch::Result currentLibraryInstrument() const;
 
     juce::TextButton      openBtn{ "Open SFZ/SF2/DS/ZIP" };
     juce::TextButton      optionsBtn{ "Options" };
 
     // ── AMP section ───────────────────────────────────────────────────────────
-    juce::Slider masterVolKnob, masterPanKnob;
-    juce::Slider pitchTransKnob, pitchFineKnob;
-    juce::Slider ampAKnob, ampDKnob, ampSKnob, ampRKnob;
+    NumericKnob masterVolKnob, masterPanKnob;
+    NumericKnob pitchTransKnob, pitchFineKnob, glideKnob;
+    NumericKnob ampAKnob, ampDKnob, ampSKnob, ampRKnob;
     ADSRDisplay  adsrDisplay;
 
     // ── FILTER section ────────────────────────────────────────────────────────
     juce::ComboBox filtTypeBox;
-    juce::Slider   filtCutKnob, filtResKnob, filtEnvKnob;
-    juce::Slider   filtAKnob, filtDKnob, filtSKnob, filtRKnob;
+    NumericKnob   filtCutKnob, filtResKnob, filtEnvKnob;
+    NumericKnob   filtAKnob, filtDKnob, filtSKnob, filtRKnob;
 
     // ── MOD section ───────────────────────────────────────────────────────────
+    juce::ComboBox modWheelBox;
     juce::ComboBox lfo1ShapeBox, lfo1TgtBox, lfo2ShapeBox, lfo2TgtBox;
-    juce::Slider   lfo1RateKnob, lfo1AmtKnob, lfo2RateKnob, lfo2AmtKnob;
+    NumericKnob   lfo1RateKnob, lfo1AmtKnob, lfo2RateKnob, lfo2AmtKnob;
 
     // ── FX section ────────────────────────────────────────────────────────────
-    juce::TextButton driveOnBtn, chorusOnBtn, delayOnBtn, reverbOnBtn, eqOnBtn;
-    juce::Slider driveAmtKnob, driveMixKnob;
-    juce::Slider choRateKnob, choDepthKnob, choMixKnob;
-    juce::Slider delTimeKnob, delFbkKnob, delMixKnob;
-    juce::Slider revSizeKnob, revDampKnob, revMixKnob;
-    juce::Slider eqLowKnob, eqMidKnob, eqHighKnob;
+    juce::TextButton driveOnBtn, chorusOnBtn, phaserOnBtn, flangerOnBtn, delayOnBtn, reverbOnBtn, eqOnBtn;
+    NumericKnob driveAmtKnob, driveMixKnob;
+    NumericKnob choRateKnob, choDepthKnob, choMixKnob;
+    NumericKnob phaRateKnob, phaDepthKnob, phaMixKnob;
+    NumericKnob flgRateKnob, flgDepthKnob, flgMixKnob;
+    NumericKnob delTimeKnob, delFbkKnob, delMixKnob;
+    NumericKnob revSizeKnob, revDampKnob, revMixKnob;
+    NumericKnob eqLowKnob, eqMidKnob, eqHighKnob;
 
     // ── Footer ────────────────────────────────────────────────────────────────
-    juce::Slider     voicesKnob;
+    NumericKnob      voicesKnob;
+    int visualHeight = 90;
+    int expandedVisualHeight = 90;
+    void toggleCompactVoicesArea();
+    void setVoicesVisualHeight(int height);
     juce::TextButton rrResetBtn{ "RR Reset" };
 
     // Grabador MP3 — solo se crea en modo Standalone (oculto por completo en VST3)
@@ -179,12 +186,14 @@ private:
     void ba(juce::TextButton& b, const juce::String& id);
     void ca(juce::ComboBox& c, const juce::String& id);
     void applyWindowConstraints();
+    void setGuiScale(float scale);
+    float maximumGuiScale() const;
+    float guiScale = 1.0f;
+    float hostScale = 1.0f;
     void triggerPreviewNote();
     void loadInstrumentForPreview(const juce::File& f);
 
-    // SF2 bank/preset selector — PopupMenu, se abre al hacer click en instrNameLabel
-    void showPresetPicker();
-    void onInstrumentLoaded(); // llamado tras cargar: auto-abre el selector si procede
+    void onInstrumentLoaded();
 
     // ── Instrument text editor (Options > Edit Instrument...) ───────────────
     bool canEditCurrentInstrument() const;

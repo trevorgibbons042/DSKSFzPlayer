@@ -1,5 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
+#include "AnimatedGif.h"
+#include "EQDisplay.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AudioVisualizer
@@ -26,6 +28,8 @@ public:
         Orbit,
         Waveform,
         Matrix,
+        EQ,
+        GIF,
         NumStyles
     };
 
@@ -47,11 +51,34 @@ public:
 
     // Notifica al editor que el usuario cambió de estilo (para persistirlo)
     std::function<void(int)> onStyleChanged;
+    std::function<void()> onGifLibraryChanged;
+    void pushSpectrumSample(float sample) { eqDisplay.pushSample(sample); }
+    EQDisplay& getEQDisplay() { return eqDisplay; }
+    void setEQResponse(double rate, float low, float mid, float high, bool on, EQBandSettings bands = {})
+    { eqDisplay.setResponse(rate, low, mid, high, on, bands); }
+    void loadGif(const juce::File&, bool showErrors = true);
+    void restoreGifs(const juce::StringArray& paths, const juce::String& selected);
+    const juce::StringArray& getGifPaths() const { return gifPaths; }
+    juce::String getGifPath() const { return gifPath; }
+    size_t getGifFrameCount() const { return gif.frames.size(); }
+    size_t getGifFrameIndex() const { return gifFrame; }
+
 
 private:
     void timerCallback() override;
     void showStyleMenu();
     void ensureSeeded();
+    void chooseGif();
+    EQDisplay eqDisplay;
+    AnimatedGif gif;
+    juce::StringArray gifPaths;
+    juce::String gifPath;
+    size_t gifFrame = 0;
+    double gifElapsedMs = 0, lastGifTick = 0;
+    juce::ThreadPool gifPool { 1 };
+    std::shared_ptr<std::atomic<int>> gifGeneration { std::make_shared<std::atomic<int>>(0) };
+    std::unique_ptr<juce::FileChooser> gifChooser;
+
 
     void drawStarfield (juce::Graphics&, juce::Rectangle<float>);
     void drawBubbles   (juce::Graphics&, juce::Rectangle<float>);
@@ -100,7 +127,7 @@ private:
     float  matrixCharPxH { 15.0f };
     juce::Font matrixFont { juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain };
 
-    juce::TextButton customizeBtn { juce::CharPointer_UTF8("\xE2\x9A\x99") };
+    juce::TextButton customizeBtn { "Visuals" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioVisualizer)
 };

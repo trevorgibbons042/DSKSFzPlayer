@@ -187,6 +187,7 @@ double LFO::process(double sampleRate, int numSamples)
 void SFZVoice::noteOn(const SFZRegion* r, int n, int vel,
                       double sampleRate, float globalTranspose, float globalTune)
 {
+    glide.start(0, 0, sampleRate);
     region       = r;
     note         = n;
     velocity     = vel;
@@ -367,7 +368,7 @@ bool SFZVoice::render(float* leftOut, float* rightOut, int numSamples,
         rightOut[i] += sR * finalGain * panR * gpR;
 
         // Avanzar posición de reproducción (pitch bend + pitch LFO)
-        playbackPos += effectiveRate;
+        playbackPos += effectiveRate * std::pow(2.0, glide.advance() / 12.0);
     }
 
     return true;
@@ -437,6 +438,7 @@ bool SFZSynth::loadRegions(std::vector<SFZRegion> preParsedRegions,
 
 void SFZSynth::unload()
 {
+    lastGlideVoice = nullptr; lastGlideNote = -1;
     for (auto& v : voices) v.resetInstant(); // APAGADO INSTANTÁNEO, corta la lectura de memoria
     regions.clear();
     sampleCache.clear();
@@ -462,6 +464,8 @@ void SFZSynth::processBlock(juce::AudioBuffer<float>& buffer,
 {
     buffer.clear();
     if (!loaded) return;
+    for (int i = juce::jlimit(1, MAX_VOICES, maxVoices); i < MAX_VOICES; ++i)
+        voices[(size_t) i].resetInstant();
 
     const int numSamples = buffer.getNumSamples();
 
@@ -512,8 +516,8 @@ void SFZSynth::renderMidi(juce::MidiBuffer& /*midi*/, int startSample,
     float* R = output.getWritePointer(output.getNumChannels() > 1 ? 1 : 0, startSample);
 
     // LFO avanza numSamples por bloque para una tasa correcta
-    double lfo1Val = lfo1.process(sampleRate, numSamples);
-    double lfo2Val = lfo2.process(sampleRate, numSamples);
+    double lfo1Val = lfo1.process(sampleRate, numSamples) * modWheel.scale(1);
+    double lfo2Val = lfo2.process(sampleRate, numSamples) * modWheel.scale(2);
 
     // Filter envelope: additive Hz offset — fltEnvLevel scales filterCutoff range
     double fltEnvLevel = filterEnv.process();
@@ -582,6 +586,9 @@ void SFZSynth::noteOn(int channel, int note, int velocity)
     filterEnv.setup(fltAttack, 0.0f, fltDecay, fltSustain, fltRelease, sampleRate);
     filterEnv.noteOn();
 
+    const double fromPitch = lastGlideVoice && lastGlideVoice->isActive()
+        ? lastGlideVoice->getNote() + lastGlideVoice->glide.value() : (double) lastGlideNote;
+    const double glideOffset = lastGlideNote >= 0 ? fromPitch - note : 0.0;
     // Asignar voces
     for (auto* r : matching)
     {
@@ -590,6 +597,9 @@ void SFZSynth::noteOn(int channel, int note, int velocity)
         v->channel = channel;
         v->noteOn(r, note, velocity, sampleRate,
                   globalTranspose + pitchBendSemis, globalTune);
+        v->glide.start(glideOffset, glideTime, sampleRate);
+        lastGlideVoice = v;
+        lastGlideNote = note;
         // Always apply master ADSR — it overrides per-region SFZ envelope
         v->setMasterADSR(ampAttack, ampDecay, ampSustain, ampRelease, sampleRate);
     }
@@ -611,6 +621,7 @@ void SFZSynth::noteOff(int channel, int note, int /*velocity*/)
 
 void SFZSynth::allNotesOff()
 {
+    lastGlideVoice = nullptr; lastGlideNote = -1;
     for (auto& v : voices) v.noteOff();
     sustainedNotes.clear();
     sustainPedal = false;
@@ -627,6 +638,7 @@ void SFZSynth::pitchBend(int /*channel*/, float semitones)
 
 void SFZSynth::controlChange(int channel, int cc, int value)
 {
+    modWheel.controller(cc, value);
     if (cc == 64) // Sustain pedal
     {
         sustainPedal = (value >= 64);
@@ -644,25 +656,15 @@ void SFZSynth::controlChange(int channel, int cc, int value)
 // ──────────────────────────────────────────────────────────────────────────────
 SFZVoice* SFZSynth::findFreeVoice(int /*note*/)
 {
-    int activeCount = 0;
-    for (auto& v : voices) if (v.isActive()) ++activeCount;
-
-    // 1. Voz completamente libre
-    for (auto& v : voices)
-        if (!v.isActive()) return &v;
-
-    // 2. Respetar límite de polifonía: robar si se excede
-    if (activeCount >= maxVoices)
-    {
-        // Robar la voz más antigua en releasing
-        for (auto& v : voices)
-            if (v.isReleasing()) { v.kill(); return &v; }
-        // Si no hay en release, robar la primera activa
-        for (auto& v : voices)
-            if (v.isActive()) { v.kill(); return &v; }
-    }
-
-    return nullptr;
+    const int limit = juce::jlimit(1, MAX_VOICES, maxVoices);
+    for (int i = limit; i < MAX_VOICES; ++i) voices[(size_t) i].resetInstant();
+    for (int i = 0; i < limit; ++i)
+        if (!voices[(size_t) i].isActive()) return &voices[(size_t) i];
+    for (int i = 0; i < limit; ++i)
+        if (voices[(size_t) i].isReleasing())
+        { voices[(size_t) i].resetInstant(); return &voices[(size_t) i]; }
+    voices[0].resetInstant();
+    return &voices[0];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

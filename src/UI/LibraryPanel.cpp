@@ -1,7 +1,7 @@
 #include <JuceHeader.h>
 #include "LibraryPanel.h"
 #include "DSKLookAndFeel.h"
-#include "RemoteBanner.h"
+#include "StarButton.h"
 
 // ── theme helper —————————————————————————————————————————————————————————————
 static DSKTheme libTheme(const juce::Component* c)
@@ -213,6 +213,7 @@ void LibraryTreeItem::populateChildren()
                 auto* item = new LibraryTreeItem(Type::SubFolder, child);
                 item->onFileActivated = onFileActivated;
                 item->onSFZRightClicked = onSFZRightClicked;
+                item->displayName = displayName;
                 item->onSFZPreview = onSFZPreview;
                 addSubItem(item);
             }
@@ -230,6 +231,7 @@ void LibraryTreeItem::populateChildren()
                 auto* item = new LibraryTreeItem(childType, child);
                 item->onFileActivated = onFileActivated;
                 item->onSFZRightClicked = onSFZRightClicked;
+                item->displayName = displayName;
                 item->onSFZPreview = onSFZPreview;
                 addSubItem(item);
             }
@@ -261,7 +263,7 @@ void LibraryTreeItem::paintItem(juce::Graphics& g, int w, int h)
 
     g.setColour(t.libText);
     g.setFont(juce::Font(12.5f));
-    g.drawText(file.getFileName(), 28, 0, w - 30, h, juce::Justification::centredLeft);
+    g.drawText(displayName ? displayName(file) : file.getFileName(), 28, 0, w - 30, h, juce::Justification::centredLeft);
 }
 
 void LibraryTreeItem::itemDoubleClicked(const juce::MouseEvent&)
@@ -284,32 +286,6 @@ void LibraryTreeItem::itemClicked(const juce::MouseEvent& e)
     }
     if (isFavoritable && e.x < 28 && onSFZPreview)
         onSFZPreview(file);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SearchResultsModel
-// ══════════════════════════════════════════════════════════════════════════════
-void SearchResultsModel::paintListBoxItem(int row, juce::Graphics& g,
-                                           int w, int h, bool selected)
-{
-    // model has no reference to a Component, use default theme for search results
-    const auto t = DSKLookAndFeel::themePreset(0);
-    if (selected) g.fillAll(t.libSel);
-    if (row < 0 || row >= (int)results.size()) return;
-    auto& r = results[(size_t)row];
-
-    g.setColour(t.accent2);
-    g.setFont(juce::Font(11.5f, juce::Font::bold));
-    g.drawText(r.name, 8, 1, w - 10, h / 2, juce::Justification::centredLeft);
-    g.setColour(t.libDim);
-    g.setFont(juce::Font(10.0f));
-    g.drawText(r.location, 8, h / 2, w - 10, h / 2 - 1, juce::Justification::centredLeft);
-}
-
-void SearchResultsModel::listBoxItemDoubleClicked(int row, const juce::MouseEvent&)
-{
-    if (row >= 0 && row < (int)results.size() && onFileActivated)
-        onFileActivated(results[(size_t)row].file);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -686,12 +662,331 @@ void FavoritesRootItem::itemClicked(const juce::MouseEvent& e)
 // ══════════════════════════════════════════════════════════════════════════════
 // LibraryPanel
 // ══════════════════════════════════════════════════════════════════════════════
+namespace
+{
+class StarRatingMenuItem : public juce::PopupMenu::CustomComponent
+{
+public:
+    StarRatingMenuItem(int value, bool selected, DSKTheme colours)
+        : rating(value), current(selected), theme(colours) {}
+    void getIdealSize(int& width, int& height) override { width = 140; height = 26; }
+    void paint(juce::Graphics& g) override
+    {
+        if (isItemHighlighted()) g.fillAll(theme.accent.withAlpha(0.15f));
+        if (current)
+        {
+            g.setColour(theme.favGold);
+            g.fillEllipse(7.0f, getHeight() * 0.5f - 2.0f, 4.0f, 4.0f);
+        }
+        for (int i = 0; i < rating; ++i)
+            StarButton::drawStar(g, { 22.0f + i * 20, (getHeight() - 16) * 0.5f, 16.0f, 16.0f }, theme.favGold, true);
+    }
+private:
+    int rating;
+    bool current;
+    DSKTheme theme;
+};
+
+void addStarRatingMenu(juce::PopupMenu& menu, int current, DSKTheme theme)
+{
+    menu.addItem(10, "Clear rating", true, current == 0);
+    for (int stars = 1; stars <= 5; ++stars)
+        menu.addCustomItem(10 + stars, std::make_unique<StarRatingMenuItem>(stars, current == stars, theme),
+            nullptr, juce::String(stars) + (stars == 1 ? " star" : " stars"));
+}
+
+class InstrumentPresetItem : public juce::TreeViewItem
+{
+public:
+    juce::String name;
+    juce::String identity;
+    bool folder = false;
+    int rating = 0;
+    std::function<void(int)> rate;
+    int starStart(int width) const { return juce::jmax(4, width - rating * 20 - 4); }
+    std::function<void()> activate;
+    std::function<void()> rename;
+    explicit InstrumentPresetItem(juce::String text) : name(std::move(text)) {}
+    bool mightContainSubItems() override { return folder || getNumSubItems() > 0; }
+    juce::String getUniqueName() const override { return identity.isEmpty() ? name : identity; }
+    int getItemHeight() const override { return name.containsChar('\n') ? 36 : 24; }
+    juce::String getTooltip() override { return name; }
+    void paintItem(juce::Graphics& g, int w, int h) override
+    {
+        auto t = libTheme(*this);
+        if (isSelected()) g.fillAll(t.libPanel);
+        g.setColour(isSelected() ? t.accent : t.libText);
+        const int textX = folder ? 24 : 4;
+        const int textWidth = juce::jmax(0, (rate && rating > 0 ? starStart(w) - 4 : w - 4) - textX);
+        if (folder)
+        {
+            const float y = (h - 14) * 0.5f;
+            juce::Path icon;
+            icon.startNewSubPath(5.0f, y + 2.0f);
+            icon.lineTo(11.0f, y + 2.0f);
+            icon.lineTo(13.0f, y + 5.0f);
+            icon.lineTo(20.0f, y + 5.0f);
+            icon.lineTo(20.0f, y + 13.0f);
+            icon.lineTo(5.0f, y + 13.0f);
+            icon.closeSubPath();
+            g.setColour(t.favGold.withAlpha(0.2f));
+            g.fillPath(icon);
+            g.setColour(t.favGold);
+            g.strokePath(icon, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved));
+            g.drawLine(5.0f, y + 5.0f, 20.0f, y + 5.0f, 1.0f);
+        }
+        if (rate)
+            for (int i = 0; i < rating; ++i)
+                StarButton::drawStar(g, juce::Rectangle<float>((float) (starStart(w) + i * 20 + 2), ((name.containsChar('\n') ? h / 2 : h) - 16) * 0.5f, 16.0f, 16.0f), t.favGold, i < rating);
+        g.setColour(isSelected() ? t.accent : t.libText);
+        g.setFont(13.0f);
+        if (name.containsChar('\n'))
+        {
+            g.drawText(name.upToFirstOccurrenceOf("\n", false, false), textX, 0, textWidth, h / 2, juce::Justification::centredLeft, true);
+            g.setFont(11.0f);
+            g.setColour(t.libDim);
+            g.drawText(name.fromFirstOccurrenceOf("\n", false, false), textX, h / 2, textWidth, h / 2, juce::Justification::centredLeft, true);
+        }
+        else g.drawText(name, textX, 0, textWidth, h, juce::Justification::centredLeft, true);
+    }
+    void itemClicked(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu()) { if (rename) rename(); }
+        else if (rate && rating > 0 && e.x >= starStart(getItemPosition(true).getWidth()) && e.x < starStart(getItemPosition(true).getWidth()) + rating * 20
+                 && e.y < (name.containsChar('\n') ? getItemHeight() / 2 : getItemHeight()))
+        {
+            const int selected = (e.x - starStart(getItemPosition(true).getWidth())) / 20 + 1;
+            auto callback = rate;
+            callback(selected == rating ? 0 : selected);
+        }
+        else if (activate) activate();
+        else if (mightContainSubItems()) setOpen(!isOpen());
+    }
+};
+}
+
+namespace
+{
+void visitInstrumentTree(juce::TreeViewItem* root, const std::function<void(juce::TreeViewItem*)>& visitor)
+{
+    if (!root) return;
+    for (int i = 0; i < root->getNumSubItems(); ++i)
+    {
+        auto* child = root->getSubItem(i);
+        visitor(child);
+        visitInstrumentTree(child, visitor);
+    }
+}
+
+juce::String instrumentIdentity(const LibrarySearch::Result& instrument)
+{
+    return instrument.file.getFullPathName() + ":" + juce::String(instrument.bank) + ":" + juce::String(instrument.program);
+}
+}
+
+void LibraryPanel::setLoadedInstrument(const LibrarySearch::Result& instrument)
+{
+    if (instrument.file == juce::File()) return;
+    const bool changed = instrumentIdentity(instrument) != instrumentIdentity(loadedInstrument);
+    loadedInstrument = instrument;
+    if (!additionalInstrumentFiles.contains(instrument.file.getFullPathName()))
+    {
+        additionalInstrumentFiles.add(instrument.file.getFullPathName());
+        refreshTree();
+    }
+    if (changed) selectBrowserInstrument(instrument);
+}
+
+void LibraryPanel::selectBrowserInstrument(const LibrarySearch::Result& instrument)
+{
+    visitInstrumentTree(presetRoot.get(), [&](juce::TreeViewItem* item)
+    {
+        if (item->getUniqueName() != instrumentIdentity(instrument)) return;
+        item->setSelected(true, true);
+        bool visible = true;
+        for (auto* parent = item->getParentItem(); parent != nullptr; parent = parent->getParentItem())
+            visible = visible && parent->isOpen();
+        if (visible) presetTree.scrollToKeepItemVisible(item);
+    });
+}
+
+void LibraryPanel::activateBrowserInstrument(const LibrarySearch::Result& instrument)
+{
+    selectBrowserInstrument(instrument);
+    if (instrument.bank >= 0 && onSoundFontPresetRequested)
+        onSoundFontPresetRequested(instrument.file, instrument.bank, instrument.program);
+    else
+        handleFileActivated(instrument.file, false);
+}
+
+void LibraryPanel::rebuildInstrumentBrowser(std::vector<LibrarySearch::Result> instruments)
+{
+    std::map<juce::String, bool> openGroups;
+    juce::String selection;
+    if (const auto* selected = presetTree.getSelectedItem(0)) selection = selected->getUniqueName();
+    visitInstrumentTree(presetRoot.get(), [&](juce::TreeViewItem* item)
+    { if (item->mightContainSubItems()) openGroups[item->getUniqueName()] = item->isOpen(); });
+    browserInstruments = std::move(instruments);
+    presetTree.setRootItem(nullptr);
+    presetRoot = std::make_unique<InstrumentPresetItem>("Instruments");
+    std::map<juce::String, InstrumentPresetItem*> groups, collections;
+    InstrumentPresetItem* hiddenSection = nullptr;
+    const auto collection = [&](const juce::String& id) -> InstrumentPresetItem*
+    {
+        if (id.isEmpty()) return nullptr;
+        auto*& item = collections[id];
+        if (!item)
+            for (const auto& folder : soundFontFolders.all())
+                if (folder.id == id)
+                {
+                    item = new InstrumentPresetItem(folder.name);
+                    item->rating = folder.rating;
+                    item->rate = [safe = juce::Component::SafePointer<LibraryPanel>(this), id](int stars)
+                    { if (safe) { safe->soundFontFolders.setRating(id, stars); safe->foldersChanged(); } };
+                    item->folder = true;
+                    item->identity = "collection:" + id;
+                    item->rename = [this, id] { showSoundFontFolderMenu(id); };
+                    presetRoot->addSubItem(item);
+                    break;
+                }
+        return item;
+    };
+    if (!browsingResults()) for (const auto& folder : soundFontFolders.all()) collection(folder.id);
+    for (const auto& instrument : browserInstruments)
+    {
+        const bool soundFont = instrument.file.hasFileExtension("sf2");
+        const bool hidden = instrument.metadata.hidden;
+        if (hidden && !hiddenSection)
+        {
+            hiddenSection = new InstrumentPresetItem("Hidden instruments");
+            hiddenSection->folder = true;
+            hiddenSection->identity = "__hidden__";
+            presetRoot->addSubItem(hiddenSection);
+        }
+        const auto groupId = (hidden ? juce::String("hidden:") : juce::String())
+            + (soundFont ? "sf2:" + instrument.file.getFullPathName()
+                : "folder:" + instrument.file.getParentDirectory().getFullPathName());
+        auto*& group = groups[groupId];
+        if (!group)
+        {
+            group = new InstrumentPresetItem(instrument.group.isEmpty() ? "Instruments" : instrument.group);
+            if (soundFont)
+            {
+                group->rating = instrumentMetadata.get(instrument.file).rating;
+                group->rate = [safe = juce::Component::SafePointer<LibraryPanel>(this), file = instrument.file](int stars)
+                { if (safe) { safe->instrumentMetadata.setRating(file, -1, -1, stars); safe->metadataChanged(); } };
+            }
+            group->folder = !soundFont;
+            group->identity = groupId;
+            if (soundFont)
+                group->rename = [this, file = instrument.file, name = instrument.group]
+                { showInstrumentMenu({ name, {}, file }); };
+            auto* parent = hidden ? hiddenSection : (soundFont ? collection(soundFontFolders.folderFor(instrument.file)) : nullptr);
+            (parent ? static_cast<juce::TreeViewItem*>(parent) : presetRoot.get())->addSubItem(group);
+        }
+        const auto details = instrument.metadata.category;
+        auto* item = new InstrumentPresetItem(instrument.name + (instrument.metadata.hidden ? " (hidden)" : "") + (details.isEmpty() ? juce::String() : "\n" + details));
+        item->rating = instrument.metadata.rating;
+        item->rate = [safe = juce::Component::SafePointer<LibraryPanel>(this), instrument](int stars)
+        { if (safe) safe->setInstrumentRating(instrument, stars); };
+        item->identity = instrumentIdentity(instrument);
+        item->activate = [this, instrument] { activateBrowserInstrument(instrument); };
+        item->rename = [this, instrument] { showInstrumentMenu(instrument); };
+        group->addSubItem(item);
+    }
+    struct GroupComparator
+    {
+        int compareElements(juce::TreeViewItem* a, juce::TreeViewItem* b) const
+        {
+            const auto* first = static_cast<InstrumentPresetItem*>(a);
+            const auto* second = static_cast<InstrumentPresetItem*>(b);
+            if ((first->identity == "__hidden__") != (second->identity == "__hidden__"))
+                return first->identity == "__hidden__" ? 1 : -1;
+            if (first->rating != second->rating) return second->rating - first->rating;
+            if (first->folder != second->folder) return first->folder ? -1 : 1;
+            return first->name.compareIgnoreCase(second->name);
+        }
+    } comparator;
+    presetRoot->sortSubItems(comparator);
+    for (const auto& entry : collections) entry.second->sortSubItems(comparator);
+    if (hiddenSection) hiddenSection->sortSubItems(comparator);
+    std::map<juce::String, size_t> indices;
+    for (size_t i = 0; i < browserInstruments.size(); ++i) indices.emplace(instrumentIdentity(browserInstruments[i]), i);
+    std::vector<LibrarySearch::Result> ordered;
+    ordered.reserve(browserInstruments.size());
+    visitInstrumentTree(presetRoot.get(), [&](juce::TreeViewItem* item)
+    {
+        const auto found = indices.find(item->getUniqueName());
+        if (found != indices.end()) ordered.push_back(std::move(browserInstruments[found->second]));
+    });
+    browserInstruments = std::move(ordered);
+    presetTree.setRootItem(presetRoot.get());
+    presetRoot->setOpen(true);
+    visitInstrumentTree(presetRoot.get(), [&](juce::TreeViewItem* item)
+    {
+        if (item->mightContainSubItems())
+        {
+            const auto previous = openGroups.find(item->getUniqueName());
+            item->setOpen(previous == openGroups.end() ? item->getUniqueName() != "__hidden__" : previous->second);
+        }
+        if (item->getUniqueName() == selection) item->setSelected(true, true);
+    });
+    if (savedTreeOpenState.isNotEmpty() && !browsingResults())
+    {
+        if (auto xml = juce::parseXML(savedTreeOpenState)) presetTree.restoreOpennessState(*xml, false);
+        savedTreeOpenState.clear();
+    }
+    if (!presetTree.getSelectedItem(0)) selectBrowserInstrument(loadedInstrument);
+    const int count = (int) browserInstruments.size();
+    searchStatus.setText(count == 0 ? (browsingResults() ? "No matching instruments" : "Add a library folder to browse instruments")
+        : juce::String(count) + " instruments", juce::dontSendNotification);
+    previousPresetBtn.setEnabled(count > 0);
+    nextPresetBtn.setEnabled(count > 0);
+}
+
 LibraryPanel::LibraryPanel()
 {
+    const auto navigate = [this](const juce::KeyPress& key) { return navigateInstruments(key); };
+    searchBox.onInstrumentNavigation = navigate;
+    presetTree.onInstrumentNavigation = navigate;
+
+    presetTree.setRootItemVisible(false);
+    presetTree.setIndentSize(12);
+    addAndMakeVisible(presetTree);
+    presetsLabel.setText("INSTRUMENTS", juce::dontSendNotification);
+
+    addAndMakeVisible(collapseAllBtn);
+    collapseAllBtn.setTooltip("Close all SoundFont and instrument groups");
+    collapseAllBtn.onClick = [this]
+    {
+        if (!presetRoot) return;
+        visitInstrumentTree(presetRoot.get(), [](juce::TreeViewItem* item)
+        { if (item->mightContainSubItems()) item->setOpen(false); });
+    };
+    addAndMakeVisible(previousPresetBtn);
+    addAndMakeVisible(nextPresetBtn);
+    previousPresetBtn.setTooltip("Previous instrument");
+    nextPresetBtn.setTooltip("Next instrument");
+    previousPresetBtn.onClick = [this] { navigateInstruments(juce::KeyPress(juce::KeyPress::upKey)); };
+    nextPresetBtn.onClick = [this] { navigateInstruments(juce::KeyPress(juce::KeyPress::downKey)); };
     searchBox.setTextToShowWhenEmpty("Search instruments...", juce::Colour(0xFF667788));
     searchBox.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xFF0D1B35));
     searchBox.setColour(juce::TextEditor::textColourId,       juce::Colour(0xFFCCDDEE));
     searchBox.setColour(juce::TextEditor::outlineColourId,    juce::Colour(0xFF334466));
+    categoryFilter.setTooltip("Filter by instrument category");
+    ratingFilter.setTooltip("Filter by minimum star rating");
+    ratingFilter.addItem("All ratings", 1);
+    ratingFilter.addItem("Unrated", 2);
+    for (int stars = 1; stars <= 5; ++stars)
+        ratingFilter.addItem(juce::String(stars) + (stars == 1 ? " star & up" : " stars & up"), stars + 2);
+    ratingFilter.setSelectedId(1, juce::dontSendNotification);
+    updateFilters();
+    categoryFilter.onChange = [this] { updateSearch(); };
+    ratingFilter.onChange = [this] { updateSearch(); };
+    addAndMakeVisible(categoryFilter);
+    addAndMakeVisible(ratingFilter);
+    searchBox.setFont(juce::Font(13.0f));
+    searchBox.setIndents(6, 4);
     searchBox.addListener(this);
     addAndMakeVisible(searchBox);
 
@@ -702,20 +997,19 @@ LibraryPanel::LibraryPanel()
     clearSearchBtn.onClick = [this]()
     {
         searchBox.clear();
-        searchResultsList.setVisible(false);
-        treeView.setVisible(true);
+        updateSearch();
         searchBox.grabKeyboardFocus();
     };
     addAndMakeVisible(clearSearchBtn);
 
-    for (auto* btn : { &addFolderBtn, &removeFolderBtn, &refreshBtn })
+    for (auto* btn : { &addFolderBtn, &removeFolderBtn, &refreshBtn, &newFolderBtn })
     {
         btn->setColour(juce::TextButton::buttonColourId,  juce::Colour(0xFF1A2A4A));
         btn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xFF00D4FF));
         addAndMakeVisible(btn);
     }
     addFolderBtn.setTooltip("Add library folder");
-    removeFolderBtn.setTooltip("Remove selected folder");
+    removeFolderBtn.setTooltip("Remove a library folder");
     refreshBtn.setTooltip("Expand / Collapse all folders");
 
     addFolderBtn.onClick = [this]()
@@ -734,79 +1028,25 @@ LibraryPanel::LibraryPanel()
 
     removeFolderBtn.onClick = [this]() { removeSelectedFolder(); };
 
-    refreshBtn.onClick = [this]()
-    {
-        if (!invisibleRoot) return;
-        bool anyOpen = false;
-        for (int i = 0; i < invisibleRoot->getNumSubItems(); ++i)
-        {
-            auto* sub = invisibleRoot->getSubItem(i);
-            if (sub && sub->getUniqueName() != "__FAVORITES_ROOT__" && sub->isOpen())
-            { anyOpen = true; break; }
-        }
-        bool newState = !anyOpen;
-        for (int i = 0; i < invisibleRoot->getNumSubItems(); ++i)
-        {
-            auto* sub = invisibleRoot->getSubItem(i);
-            if (sub && sub->getUniqueName() != "__FAVORITES_ROOT__")
-                sub->setOpen(newState);
-        }
-        invisibleRoot->treeHasChanged();
-    };
-
-    treeView.setColour(juce::TreeView::backgroundColourId, juce::Colour(0xFF0D1B35));
-    treeView.setRootItemVisible(false);
-    treeView.setIndentSize(12); // menos sangrado por nivel (por defecto JUCE usa ~24px)
-    addAndMakeVisible(treeView);
-
-    searchResultsList.setModel(&searchModel);
-    searchResultsList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xFF0D1B35));
-    searchResultsList.setRowHeight(36);
-    addAndMakeVisible(searchResultsList);
-    searchResultsList.setVisible(false);
-
-    searchModel.onFileActivated = [this](const juce::File& f)
-    {
-        handleFileActivated(f, f.hasFileExtension(".zip"));
-    };
-
-    bannerImage = juce::ImageCache::getFromMemory(BinaryData::banner_png,
-        BinaryData::banner_pngSize);
-    RemoteBanner::trackImpressionAsync();
-
-    fetchRemoteBanner();
+    refreshBtn.setButtonText("R");
+    refreshBtn.setTooltip("Refresh instruments from all library folders");
+    refreshBtn.onClick = [this] { refreshTree(); };
+    newFolderBtn.setTooltip("Create a folder for SoundFonts");
+    newFolderBtn.onClick = [this] { showCreateSoundFontFolder(); };
+    addAndMakeVisible(searchStatus);
+    searchStatus.setFont(juce::Font(11.0f));
 
     refreshTree();
+    lookAndFeelChanged();
 }
 
 LibraryPanel::~LibraryPanel()
 {
-    bannerStillAlive->store(false);
+    ++*searchGeneration;
+    searchPool.removeAllJobs(true, -1);
+    presetTree.setRootItem(nullptr);
     favoritesRootItem = nullptr;
     treeView.setRootItem(nullptr);
-}
-
-// Descarga banner.json + imagen en un hilo aparte; si tiene éxito, sustituye el
-// banner embebido. Si falla por cualquier motivo (red, JSON inválido, imagen
-// corrupta) el banner/URL embebidos de fallback quedan como están, sin más.
-void LibraryPanel::fetchRemoteBanner()
-{
-    auto aliveFlag = bannerStillAlive;
-    juce::Thread::launch([this, aliveFlag]
-    {
-        auto result = RemoteBanner::fetchBlocking();
-        if (!result.ok)
-            return;
-
-        juce::MessageManager::callAsync([this, aliveFlag, result]
-        {
-            if (!aliveFlag->load())
-                return; // el LibraryPanel ya se destruyó
-            bannerImage    = result.image;
-            bannerClickUrl = result.url;
-            repaint();
-        });
-    });
 }
 
 void LibraryPanel::lookAndFeelChanged()
@@ -815,16 +1055,39 @@ void LibraryPanel::lookAndFeelChanged()
     searchBox.setTextToShowWhenEmpty("Search instruments...", t.libDim);
     searchBox.setColour(juce::TextEditor::backgroundColourId, t.libTreeBg);
     searchBox.setColour(juce::TextEditor::textColourId,       t.libText);
-    searchBox.setColour(juce::TextEditor::outlineColourId,    t.border);
+    searchBox.applyColourToAllText(t.libText);
+    searchBox.setColour(juce::TextEditor::outlineColourId, t.divider);
+    searchBox.setColour(juce::TextEditor::focusedOutlineColourId, t.accent);
+    searchBox.setColour(juce::TextEditor::highlightColourId, t.libSel);
+    searchBox.setColour(juce::TextEditor::highlightedTextColourId, t.libText);
+    for (auto* filter : { &categoryFilter, &ratingFilter })
+    {
+        filter->setColour(juce::ComboBox::backgroundColourId, t.libTreeBg);
+        filter->setColour(juce::ComboBox::textColourId, t.libText);
+        filter->setColour(juce::ComboBox::outlineColourId, t.divider);
+        filter->setColour(juce::ComboBox::arrowColourId, t.accent);
+        filter->setColour(juce::ComboBox::focusedOutlineColourId, t.accent);
+    }
+    presetsLabel.setColour(juce::Label::textColourId, t.accent);
+    presetsLabel.setFont(juce::Font(11.0f, juce::Font::bold));
+    for (auto* button : { &collapseAllBtn, &previousPresetBtn, &nextPresetBtn })
+    {
+        button->setColour(juce::TextButton::buttonColourId, t.libPanel);
+        button->setColour(juce::TextButton::textColourOffId, t.accent);
+    }
+    presetTree.setColour(juce::TreeView::backgroundColourId, t.libTreeBg);
     treeView.setColour(juce::TreeView::backgroundColourId, t.libTreeBg);
-    searchResultsList.setColour(juce::ListBox::backgroundColourId, t.libTreeBg);
-    for (auto* btn : { &addFolderBtn, &removeFolderBtn, &refreshBtn })
+
+    searchStatus.setColour(juce::Label::textColourId, t.libDim);
+    for (auto* btn : { &addFolderBtn, &removeFolderBtn, &refreshBtn, &newFolderBtn })
     {
         btn->setColour(juce::TextButton::buttonColourId,  t.libPanel);
         btn->setColour(juce::TextButton::textColourOffId, t.accent);
     }
     clearSearchBtn.setColour(juce::TextButton::textColourOffId, t.libDim);
     treeView.repaint();
+    presetTree.repaint();
+
     repaint();
 }
 
@@ -838,42 +1101,8 @@ void LibraryPanel::paint(juce::Graphics& g)
 
     g.setColour(t.accent);
     g.setFont(juce::Font(12.0f, juce::Font::bold));
-    g.drawText("LIBRARY", 6, 4, 80, 18, juce::Justification::centredLeft);
+    g.drawText("INSTRUMENTS", 6, 4, juce::jmax(0, getWidth() - 120), 18, juce::Justification::centredLeft);
 
-    if (bannerImage.isValid())
-    {
-        int bannerH = 40;
-        g.drawImageWithin(bannerImage, 5, getHeight() - bannerH - 5,
-                          getWidth() - 10, bannerH, juce::RectanglePlacement::stretchToFit);
-    }
-}
-
-juce::Rectangle<int> LibraryPanel::getBannerBounds() const
-{
-    return { 5, getHeight() - 45, getWidth() - 10, 40 };
-}
-
-void LibraryPanel::mouseDown(const juce::MouseEvent& e)
-{
-    if (bannerImage.isValid() && getBannerBounds().contains(e.getPosition()))
-    {
-        RemoteBanner::trackClickAsync(bannerClickUrl);
-        juce::URL(bannerClickUrl).launchInDefaultBrowser();
-    }
-}
-
-void LibraryPanel::mouseMove(const juce::MouseEvent& e)
-{
-    if (bannerImage.isValid() && getBannerBounds().contains(e.getPosition()))
-        setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    else
-        setMouseCursor(juce::MouseCursor::NormalCursor);
-}
-
-void LibraryPanel::mouseExit(const juce::MouseEvent& e)
-{
-    juce::ignoreUnused(e);
-    setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 
 void LibraryPanel::resized()
@@ -882,6 +1111,7 @@ void LibraryPanel::resized()
 
     auto header = area.removeFromTop(26);
     refreshBtn.setBounds     (header.removeFromRight(30).reduced(2));
+    newFolderBtn.setBounds   (header.removeFromRight(30).reduced(2));
     removeFolderBtn.setBounds(header.removeFromRight(26).reduced(2));
     addFolderBtn.setBounds   (header.removeFromRight(26).reduced(2));
 
@@ -889,9 +1119,15 @@ void LibraryPanel::resized()
     clearSearchBtn.setBounds(searchBox.getRight() - 24, searchBox.getY() + 2,
                              20, searchBox.getHeight() - 4);
 
-    area.removeFromBottom(45);  // banner footer
-    treeView.setBounds(area);
-    searchResultsList.setBounds(area);
+    categoryFilter.setBounds(area.removeFromTop(26).reduced(4, 2));
+    ratingFilter.setBounds(area.removeFromTop(26).reduced(4, 2));
+    auto controls = area.removeFromTop(26);
+    nextPresetBtn.setBounds(controls.removeFromRight(28).reduced(2));
+    previousPresetBtn.setBounds(controls.removeFromRight(28).reduced(2));
+    collapseAllBtn.setBounds(controls.removeFromLeft(88).reduced(2));
+    searchStatus.setBounds(controls.reduced(4, 0));
+    presetTree.setBounds(area);
+
 }
 
 void LibraryPanel::addFolder(const juce::File& folder)
@@ -903,55 +1139,7 @@ void LibraryPanel::addFolder(const juce::File& folder)
 
 void LibraryPanel::refreshTree()
 {
-    favoritesRootItem = nullptr;
-    treeView.setRootItem(nullptr);
-
-    invisibleRoot = std::make_unique<LibraryTreeItem>(
-        LibraryTreeItem::Type::RootFolder, juce::File());
-
-    auto* favRoot = new FavoritesRootItem(&favorites);
-    favRoot->onActivated  = [this](const juce::File& f) { handleFileActivated(f, false); };
-    favRoot->onChanged    = [this]() { rebuildFavoritesSection(); };
-    favRoot->onSFZPreview = [this](const juce::File& f) { if (onSFZPreviewRequested) onSFZPreviewRequested(f); };
-    invisibleRoot->addSubItem(favRoot);
-    favoritesRootItem = favRoot;
-
-    for (auto& path : libraryFolderPaths)
-    {
-        juce::File folder(path);
-        if (!folder.isDirectory()) continue;
-        auto* item = new LibraryTreeItem(LibraryTreeItem::Type::RootFolder, folder);
-        item->onFileActivated   = [this](const juce::File& f, bool iz) { handleFileActivated(f, iz); };
-        item->onSFZRightClicked = [this](const juce::File& f, const juce::MouseEvent& ev) { showAddToFavoritesMenu(f, ev); };
-        item->onSFZPreview      = [this](const juce::File& f) { if (onSFZPreviewRequested) onSFZPreviewRequested(f); };
-        invisibleRoot->addSubItem(item);
-    }
-
-    treeView.setRootItem(invisibleRoot.get());
-    invisibleRoot->setOpen(true);
-    favoritesRootItem->setOpen(false);
-    favoritesRootItem->rebuild();
-
-    juce::MessageManager::callAsync([this, treeState = savedTreeOpenState]()
-    {
-        if (!invisibleRoot) return;
-        savedTreeOpenState.clear();
-        if (treeState.isNotEmpty())
-        {
-            if (auto xml = juce::parseXML(treeState))
-                treeView.restoreOpennessState(*xml, false);
-        }
-        else
-        {
-            for (int i = 0; i < invisibleRoot->getNumSubItems(); ++i)
-            {
-                auto* sub = invisibleRoot->getSubItem(i);
-                if (sub)
-                    sub->setOpen(false);
-            }
-        }
-        invisibleRoot->treeHasChanged();
-    });
+    runSearch(searchBox.getText().trim());
 }
 
 void LibraryPanel::rebuildFavoritesSection()
@@ -963,7 +1151,7 @@ void LibraryPanel::rebuildFavoritesSection()
 void LibraryPanel::showAddToFavoritesMenu(const juce::File& sfzFile,
                                            const juce::MouseEvent& /*e*/)
 {
-    const juce::String instrName = sfzFile.getFileNameWithoutExtension();
+    const juce::String instrName = soundFontName(sfzFile, sfzFile.getFileNameWithoutExtension());
 
     juce::PopupMenu folderMenu;
     // Option: add directly to Favorites root (no folder)
@@ -979,12 +1167,17 @@ void LibraryPanel::showAddToFavoritesMenu(const juce::File& sfzFile,
 
     juce::PopupMenu menu;
     menu.addSubMenu("Add to Favorites", folderMenu);
+    if (sfzFile.hasFileExtension("sf2")) menu.addItem(97, "Rename SoundFont...");
 
     menu.showMenuAsync(
         juce::PopupMenu::Options(),
         [this, sfzFile, instrName](int result)
         {
-            if (result == 98)
+            if (result == 97)
+            {
+                renameSoundFont(sfzFile, sfzFile.getFileNameWithoutExtension());
+            }
+            else if (result == 98)
             {
                 // add to root
                 if (favorites.addRootEntry(instrName, sfzFile))
@@ -1031,73 +1224,336 @@ void LibraryPanel::showAddToFavoritesMenu(const juce::File& sfzFile,
         });
 }
 
+void LibraryPanel::metadataChanged()
+{
+    if (nameSettings)
+    {
+        nameSettings->setValue("instrumentMetadata", juce::JSON::toString(instrumentMetadata.toJson()));
+        if (!nameSettings->saveIfNeeded())
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Changes not saved", "Ratings and categories changed for this session, but settings could not be saved.");
+    }
+    updateFilters();
+    updateSearch();
+    repaint();
+}
+
+void LibraryPanel::setInstrumentRating(const LibrarySearch::Result& instrument, int rating)
+{
+    if (instrument.file == juce::File()) return;
+    instrumentMetadata.setRating(instrument.file, instrument.bank, instrument.program, rating);
+    metadataChanged();
+}
+
+juce::String LibraryPanel::createSoundFontFolder(const juce::String& name)
+{
+    const auto id = soundFontFolders.add(name);
+    if (id.isNotEmpty()) foldersChanged();
+    return id;
+}
+
+void LibraryPanel::moveSoundFontToFolder(const juce::File& file, const juce::String& folderId)
+{
+    if (!soundFontFolders.move(file, folderId)) return;
+    additionalInstrumentFiles.addIfNotAlreadyThere(file.getFullPathName());
+    foldersChanged();
+}
+
+void LibraryPanel::removeSoundFontFolder(const juce::String& folderId)
+{
+    soundFontFolders.remove(folderId);
+    foldersChanged();
+}
+
+void LibraryPanel::foldersChanged()
+{
+    if (nameSettings) { saveState(*nameSettings); nameSettings->saveIfNeeded(); }
+    refreshTree();
+}
+
+void LibraryPanel::showCreateSoundFontFolder(const juce::File& file)
+{
+    auto* dialog = new juce::AlertWindow("New SoundFont folder", "Choose a folder name:", juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", {}, "Name:");
+    dialog->addButton("Create", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<LibraryPanel> safeThis(this);
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, file, dialog](int answer)
+    {
+        if (!safeThis || answer != 1) return;
+        const auto id = safeThis->createSoundFontFolder(dialog->getTextEditorContents("name"));
+        if (file != juce::File() && id.isNotEmpty()) safeThis->moveSoundFontToFolder(file, id);
+    }), true);
+}
+
+void LibraryPanel::showSoundFontFolderMenu(const juce::String& id)
+{
+    juce::String name;
+    for (const auto& folder : soundFontFolders.all()) if (folder.id == id) name = folder.name;
+    juce::PopupMenu menu;
+    menu.addSectionHeader(name);
+    menu.addItem(1, "Rename folder...");
+    menu.addItem(2, "Remove folder (keep SoundFonts)");
+    juce::PopupMenu ratings;
+    int currentRating = 0;
+    for (const auto& folder : soundFontFolders.all()) if (folder.id == id) currentRating = folder.rating;
+    addStarRatingMenu(ratings, currentRating, libTheme(this));
+    menu.addSubMenu("Star rating", ratings);
+    juce::Component::SafePointer<LibraryPanel> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, id, name](int result)
+    {
+        if (!safeThis) return;
+        if (result >= 10 && result <= 15)
+        { safeThis->soundFontFolders.setRating(id, result - 10); safeThis->foldersChanged(); }
+        else if (result == 2) safeThis->removeSoundFontFolder(id);
+        else if (result == 1)
+        {
+            auto* dialog = new juce::AlertWindow("Rename folder", "Choose a folder name:", juce::MessageBoxIconType::NoIcon);
+            dialog->addTextEditor("name", name, "Name:");
+            dialog->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            dialog->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, id, dialog](int answer)
+            {
+                if (safeThis && answer == 1 && safeThis->soundFontFolders.rename(id, dialog->getTextEditorContents("name")))
+                    safeThis->foldersChanged();
+            }), true);
+        }
+    });
+}
+
+void LibraryPanel::showInstrumentMenu(const LibrarySearch::Result& instrument, bool categoryOnly)
+{
+    const bool isBank = instrument.file.hasFileExtension("sf2") && instrument.bank < 0;
+    const auto info = instrumentInfo(instrument);
+    const auto categories = instrumentMetadata.categories();
+    juce::PopupMenu menu, categoryItems;
+    auto& types = categoryOnly ? menu : categoryItems;
+    menu.addSectionHeader(instrument.name);
+    {
+        types.addItem(20, "Uncategorized", true, info.category.isEmpty());
+        for (int i = 0; i < categories.size(); ++i)
+            types.addItem(100 + i, categories[i], true, info.category.equalsIgnoreCase(categories[i]));
+        types.addSeparator();
+        types.addItem(21, "Custom category...");
+        if (!categoryOnly)
+        {
+            menu.addSubMenu("Category", types);
+        }
+    }
+    if (!categoryOnly && !isBank) menu.addItem(30, info.hidden ? "Show instrument" : "Hide instrument");
+    if (!categoryOnly && instrument.file != juce::File())
+        menu.addItem(1, isBank ? "Rename SoundFont..." : "Rename instrument...");
+    const auto folders = soundFontFolders.all();
+    if (!categoryOnly && isBank)
+    {
+        juce::PopupMenu destinations;
+        const auto current = soundFontFolders.folderFor(instrument.file);
+        destinations.addItem(1001, "No folder", true, current.isEmpty());
+        for (size_t i = 0; i < folders.size(); ++i)
+            destinations.addItem(10000 + (int) i, folders[i].name, true, current == folders[i].id);
+        destinations.addSeparator();
+        destinations.addItem(1000, "New folder...");
+        menu.addSubMenu("Move SoundFont to folder", destinations);
+    }
+    const juce::Component::SafePointer<LibraryPanel> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, instrument, categories, folders](int result)
+    {
+        if (!safeThis || result == 0) return;
+        if (result == 1000) safeThis->showCreateSoundFontFolder(instrument.file);
+        else if (result == 1001) safeThis->moveSoundFontToFolder(instrument.file, {});
+        else if (result >= 10000 && result < 10000 + (int) folders.size())
+            safeThis->moveSoundFontToFolder(instrument.file, folders[(size_t) (result - 10000)].id);
+        else if (result == 30)
+        {
+            safeThis->setInstrumentHidden(instrument, !safeThis->instrumentInfo(instrument).hidden);
+        }
+        else if (result == 1)
+            safeThis->renameSoundFont(instrument.file, instrument.name, instrument.bank, instrument.program);
+        else if (result >= 10 && result <= 15)
+            safeThis->setInstrumentRating(instrument, result - 10);
+        else if (result == 20 || (result >= 100 && result < 100 + categories.size()))
+        {
+            safeThis->instrumentMetadata.setCategory(instrument.file, instrument.bank, instrument.program,
+                result == 20 ? juce::String() : categories[result - 100]);
+            safeThis->metadataChanged();
+        }
+        else if (result == 21)
+        {
+            auto* dialog = new juce::AlertWindow("Instrument category", "Enter a category name:", juce::MessageBoxIconType::NoIcon);
+            dialog->addTextEditor("category", safeThis->instrumentInfo(instrument).category, "Category:");
+            dialog->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            dialog->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, instrument, dialog](int answer)
+            {
+                if (!safeThis || answer != 1) return;
+                safeThis->instrumentMetadata.setCategory(instrument.file, instrument.bank, instrument.program,
+                    dialog->getTextEditorContents("category"));
+                safeThis->metadataChanged();
+            }), true);
+        }
+    });
+}
+
+void LibraryPanel::renameSoundFont(const juce::File& file, const juce::String& original,
+                                  int bank, int program)
+{
+    auto* dialog = new juce::AlertWindow(bank < 0 && file.hasFileExtension("sf2") ? "Rename SoundFont" : "Rename Instrument",
+        "Choose a custom name for this player. Leave blank to restore the original name.",
+        juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", soundFontName(file, original, bank, program), "Name:");
+    dialog->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    const juce::Component::SafePointer<LibraryPanel> safeThis(this);
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, dialog, file, bank, program](int result)
+        {
+            if (!safeThis || result != 1) return;
+            safeThis->soundFontNames.set(file, bank, program, dialog->getTextEditorContents("name"));
+            if (bank < 0)
+            {
+                const auto name = safeThis->soundFontName(file, file.getFileNameWithoutExtension());
+                const auto update = [&](auto& entries)
+                {
+                    for (auto& entry : entries) if (entry.file == file) entry.name = name;
+                };
+                update(safeThis->favorites.rootEntries);
+                for (auto& folder : safeThis->favorites.folders) update(folder.entries);
+            }
+            if (auto* settings = safeThis->nameSettings)
+            {
+                settings->setValue("soundfontNames", juce::JSON::toString(safeThis->soundFontNames.toJson()));
+                safeThis->favorites.save(*settings);
+                if (!settings->saveIfNeeded())
+                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                        "Name not saved", "The name was changed for this session, but the settings file could not be saved.");
+            }
+            safeThis->refreshTree();
+            safeThis->repaint();
+        }), true);
+}
+
 void LibraryPanel::removeSelectedFolder()
 {
-    auto* sel = dynamic_cast<LibraryTreeItem*>(treeView.getSelectedItem(0));
-    if (!sel || sel->getType() != LibraryTreeItem::Type::RootFolder) return;
-
-    juce::String folderPath = sel->getFile().getFullPathName();
-
-    juce::AlertWindow::showAsync(
-        juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::QuestionIcon)
-            .withTitle("Remove Folder")
-            .withMessage("Remove this folder from the library?")
-            .withButton("Remove")
-            .withButton("Cancel"),
-        [this, folderPath](int result)
+    juce::PopupMenu menu;
+    const auto folders = libraryFolderPaths;
+    for (int i = 0; i < folders.size(); ++i)
+        menu.addItem(i + 1, juce::File(folders[i]).getFileName());
+    juce::Component::SafePointer<LibraryPanel> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&removeFolderBtn),
+        [safeThis, folders](int result)
         {
-            if (result == 1)
-            {
-                libraryFolderPaths.removeString(folderPath);
-                refreshTree();
-            }
+            if (!safeThis || result <= 0 || result > folders.size()) return;
+            safeThis->libraryFolderPaths.removeString(folders[result - 1]);
+            for (int i = safeThis->additionalInstrumentFiles.size(); --i >= 0;)
+                if (juce::File(safeThis->additionalInstrumentFiles[i]).isAChildOf(juce::File(folders[result - 1])))
+                    safeThis->additionalInstrumentFiles.remove(i);
+            safeThis->refreshTree();
         });
 }
 
-void LibraryPanel::textEditorTextChanged(juce::TextEditor& editor)
+bool LibraryPanel::navigateInstruments(const juce::KeyPress& key)
 {
-    juce::String query = editor.getText().trim();
-    clearSearchBtn.setVisible(query.isNotEmpty());
+    if (!key.isKeyCode(juce::KeyPress::upKey) && !key.isKeyCode(juce::KeyPress::downKey)
+        && !key.isKeyCode(juce::KeyPress::leftKey) && !key.isKeyCode(juce::KeyPress::rightKey)) return false;
+    // Closed groups are excluded, so arrows never reveal or load hidden presets.
+    std::vector<const LibrarySearch::Result*> visibleInstruments;
+    std::map<juce::String, const LibrarySearch::Result*> byIdentity;
+    for (const auto& instrument : browserInstruments)
+        if (!instrument.metadata.hidden) byIdentity.emplace(instrumentIdentity(instrument), &instrument);
+    std::function<void(juce::TreeViewItem*)> collect = [&](juce::TreeViewItem* parent)
+    {
+        if (!parent || !parent->isOpen()) return;
+        for (int i = 0; i < parent->getNumSubItems(); ++i)
+        {
+            auto* child = parent->getSubItem(i);
+            const auto found = byIdentity.find(child->getUniqueName());
+            if (found != byIdentity.end()) visibleInstruments.push_back(found->second);
+            else collect(child);
+        }
+    };
+    collect(presetRoot.get());
+    if (visibleInstruments.empty()) return true;
+    const int direction = (key.isKeyCode(juce::KeyPress::upKey) || key.isKeyCode(juce::KeyPress::leftKey)) ? -1 : 1;
+    const auto* selected = presetTree.getSelectedItem(0);
+    const auto identity = selected ? selected->getUniqueName() : instrumentIdentity(loadedInstrument);
+    int current = -1;
+    for (int i = 0; i < (int) visibleInstruments.size(); ++i)
+        if (instrumentIdentity(*visibleInstruments[(size_t) i]) == identity) { current = i; break; }
+    const int count = (int) visibleInstruments.size();
+    const int next = current < 0 ? (direction > 0 ? 0 : count - 1) : juce::jlimit(0, count - 1, current + direction);
+    if (next != current) activateBrowserInstrument(*visibleInstruments[(size_t) next]);
+    return true;
+}
 
-    if (query.isEmpty())
+void LibraryPanel::textEditorTextChanged(juce::TextEditor&)
+{
+    updateSearch();
+}
+
+bool LibraryPanel::browsingResults() const
+{
+    return searchBox.getText().trim().isNotEmpty() || currentFilter().active();
+}
+
+InstrumentMetadata::Filter LibraryPanel::currentFilter() const
+{
+    InstrumentMetadata::Filter filter;
+    filter.unratedOnly = ratingFilter.getSelectedId() == 2;
+    filter.minimumRating = juce::jmax(0, ratingFilter.getSelectedId() - 2);
+    filter.uncategorizedOnly = categoryFilter.getSelectedId() == 2;
+    if (categoryFilter.getSelectedId() > 2) filter.category = categoryFilter.getText();
+    return filter;
+}
+
+void LibraryPanel::updateFilters()
+{
+    const auto selected = categoryFilter.getText();
+    const int oldId = categoryFilter.getSelectedId();
+    categoryFilter.clear(juce::dontSendNotification);
+    categoryFilter.addItem("All categories", 1);
+    categoryFilter.addItem("Uncategorized", 2);
+    int id = 3, selectedId = oldId == 2 ? 2 : 1;
+    for (const auto& category : instrumentMetadata.categories())
     {
-        searchResultsList.setVisible(false);
-        treeView.setVisible(true);
+        categoryFilter.addItem(category, id);
+        if (oldId > 2 && category.equalsIgnoreCase(selected)) selectedId = id;
+        ++id;
     }
-    else
-    {
-        treeView.setVisible(false);
-        searchResultsList.setVisible(true);
-        runSearch(query);
-    }
+    categoryFilter.setSelectedId(selectedId, juce::dontSendNotification);
+}
+
+void LibraryPanel::updateSearch()
+{
+    ++*searchGeneration;
+    const auto query = searchBox.getText().trim();
+    clearSearchBtn.setVisible(query.isNotEmpty());
+    runSearch(query);
+    resized();
 }
 
 void LibraryPanel::runSearch(const juce::String& query)
 {
-    juce::String lq = query.toLowerCase();
-    searchModel.results.clear();
+    const int generation = ++*searchGeneration;
+    const auto token = searchGeneration;
+    const auto folders = libraryFolderPaths;
+    const auto names = soundFontNames;
+    const auto metadata = instrumentMetadata;
+    const auto filter = currentFilter();
+    const auto extraFiles = additionalInstrumentFiles;
+    const juce::Component::SafePointer<LibraryPanel> safeThis(this);
 
-    for (auto& path : libraryFolderPaths)
+    searchStatus.setText(query.isEmpty() ? "Loading instruments..." : "Searching instruments...", juce::dontSendNotification);
+    searchPool.addJob([safeThis, token, generation, folders, query, names, metadata, filter, extraFiles]
     {
-        juce::File folder(path);
-        if (!folder.isDirectory()) continue;
-        juce::Array<juce::File> found;
-        folder.findChildFiles(found, juce::File::findFiles, true, "*.sfz;*.sf2;*.dspreset;*.dslibrary");
-        for (auto& f : found)
+        const auto cancelled = [&] { return token->load() != generation; };
+        auto results = LibrarySearch::find(folders, query, cancelled, names, metadata, filter, true, extraFiles);
+        if (cancelled()) return;
+        juce::MessageManager::callAsync([safeThis, token, generation, results = std::move(results)]() mutable
         {
-            if (f.getFileNameWithoutExtension().toLowerCase().contains(lq) ||
-                f.getFullPathName().toLowerCase().contains(lq))
-            {
-                SearchResultsModel::Result r;
-                r.name     = f.getFileNameWithoutExtension();
-                r.location = f.getParentDirectory().getFullPathName();
-                r.file     = f;
-                searchModel.results.push_back(r);
-            }
-        }
-    }
-    searchResultsList.updateContent();
+            if (!safeThis || token->load() != generation) return;
+            safeThis->rebuildInstrumentBrowser(std::move(results));
+        });
+    });
 }
 
 void LibraryPanel::handleFileActivated(const juce::File& file, bool isZip)
@@ -1197,6 +1653,9 @@ juce::var LibraryPanel::buildConfigJson() const
     juce::Array<juce::var> libFolders;
     for (auto& p : libraryFolderPaths) libFolders.add(p);
     root->setProperty("library_folders", libFolders);
+    juce::Array<juce::var> files;
+    for (const auto& file : additionalInstrumentFiles) files.add(file);
+    root->setProperty("instrument_files", files);
 
     // favorites
     auto* favsObj = new juce::DynamicObject();
@@ -1229,6 +1688,9 @@ juce::var LibraryPanel::buildConfigJson() const
     }
     favsObj->setProperty("folders", foldersArr);
     root->setProperty("favorites", juce::var(favsObj));
+    root->setProperty("soundfont_names", soundFontNames.toJson());
+    root->setProperty("soundfont_folders", soundFontFolders.toJson());
+    root->setProperty("instrument_metadata", instrumentMetadata.toJson());
 
     return juce::var(root);
 }
@@ -1238,6 +1700,15 @@ int LibraryPanel::applyConfigJson(const juce::var& parsed)
     auto* obj = parsed.getDynamicObject();
     if (!obj) return -1;
 
+    if (obj->hasProperty("instrument_metadata"))
+    {
+        instrumentMetadata.fromJson(obj->getProperty("instrument_metadata"));
+        updateFilters();
+    }
+    if (obj->hasProperty("soundfont_folders")) soundFontFolders.fromJson(obj->getProperty("soundfont_folders"));
+    if (obj->hasProperty("soundfont_names"))
+        soundFontNames.fromJson(obj->getProperty("soundfont_names"));
+
     int themeIdx = -1;
     if (obj->hasProperty("uiTheme"))
         themeIdx = (int)obj->getProperty("uiTheme");
@@ -1246,6 +1717,12 @@ int LibraryPanel::applyConfigJson(const juce::var& parsed)
     {
         libraryFolderPaths.clear();
         for (auto& v : *arr) libraryFolderPaths.add(v.toString());
+    }
+
+    if (auto* files = obj->getProperty("instrument_files").getArray())
+    {
+        additionalInstrumentFiles.clear();
+        for (const auto& file : *files) additionalInstrumentFiles.add(file.toString());
     }
 
     auto favsVar = obj->getProperty("favorites");
@@ -1289,6 +1766,7 @@ int LibraryPanel::applyConfigJson(const juce::var& parsed)
     }
 
     refreshTree();
+    updateSearch();
     return themeIdx;
 }
 
@@ -1342,21 +1820,32 @@ void LibraryPanel::startImport()
                     onThemeChanged(themeIdx);
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
                     "Config Imported",
-                    "Library and favorites restored from:\n" + src.getFullPathName());
+                    "Instruments and settings restored from:\n" + src.getFullPathName());
             }
         });
 }
 
 void LibraryPanel::saveState(juce::PropertiesFile& props)
 {
+    props.setValue("instrumentMetadata", juce::JSON::toString(instrumentMetadata.toJson()));
+    props.setValue("soundfontFolders", juce::JSON::toString(soundFontFolders.toJson()));
+    props.setValue("soundfontNames", juce::JSON::toString(soundFontNames.toJson()));
     props.setValue("libraryFolders", libraryFolderPaths.joinIntoString("|"));
+    juce::Array<juce::var> files;
+    for (const auto& file : additionalInstrumentFiles) files.add(file);
+    props.setValue("instrumentFiles", juce::JSON::toString(juce::var(files)));
     favorites.save(props);
-    if (auto xml = treeView.getOpennessState(true))
-        props.setValue("treeOpenState", xml->toString());
+    if (auto xml = presetTree.getOpennessState(true))
+        props.setValue("instrumentTreeOpenState", xml->toString());
 }
 
 void LibraryPanel::loadState(juce::PropertiesFile& props)
 {
+    nameSettings = &props;
+    instrumentMetadata.fromJson(juce::JSON::parse(props.getValue("instrumentMetadata")));
+    updateFilters();
+    soundFontNames.fromJson(juce::JSON::parse(props.getValue("soundfontNames")));
+    soundFontFolders.fromJson(juce::JSON::parse(props.getValue("soundfontFolders")));
     juce::String saved = props.getValue("libraryFolders", "");
     if (saved.isNotEmpty())
     {
@@ -1364,6 +1853,9 @@ void LibraryPanel::loadState(juce::PropertiesFile& props)
         libraryFolderPaths.addTokens(saved, "|", "");
     }
     favorites.load(props);
-    savedTreeOpenState = props.getValue("treeOpenState", "");
+    const auto files = juce::JSON::parse(props.getValue("instrumentFiles"));
+    if (auto* array = files.getArray())
+        for (const auto& file : *array) additionalInstrumentFiles.addIfNotAlreadyThere(file.toString());
+    savedTreeOpenState = props.getValue("instrumentTreeOpenState", "");
     refreshTree();
 }

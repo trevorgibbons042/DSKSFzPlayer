@@ -23,6 +23,16 @@ class DSKStandaloneWindow : public juce::StandaloneFilterWindow
 public:
     using juce::StandaloneFilterWindow::StandaloneFilterWindow;
 
+    void integrateOptions()
+    {
+        for (auto* child : getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*>(child))
+                if (button->getButtonText() == "Options") button->setVisible(false);
+        if (auto* editor = dynamic_cast<DSKSFzEditor*>(getAudioProcessor()->getActiveEditor()))
+            editor->standaloneOption = [this](int result)
+            { handleMenuResult(result); if (result == 4) integrateOptions(); };
+    }
+
     // Cierre solicitado por el botón de la ventana: primero comprobamos si
     // hay cambios sin guardar en el editor de instrumento (Options > Edit
     // Instrument...); solo si el usuario decide continuar (guardar o
@@ -121,6 +131,7 @@ public:
         mainWindow.reset(new DSKStandaloneWindow(getApplicationName(),
             juce::LookAndFeel::getDefaultLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId),
             appProperties.getUserSettings(), false, {}, nullptr, {}));
+        mainWindow->integrateOptions();
         mainWindow->setVisible(true);
 
         loadInstrumentFromCommandLine();

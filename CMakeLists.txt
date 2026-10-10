@@ -60,7 +60,6 @@ target_sources(DSKSFzPlayer
         src/UI/SF2PresetPicker.cpp
         src/UI/DSPresetPicker.cpp
         src/UI/AudioVisualizer.cpp
-        src/UI/RemoteBanner.cpp
         src/UI/RecorderBar.cpp
         src/UI/InstrumentEditorWindow.cpp
         src/Audio/Mp3Recorder.cpp
@@ -145,7 +144,6 @@ target_link_libraries(DSKSFzPlayer
 juce_add_binary_data(MyResources
     HEADER_NAME "BinaryData.h"
     SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/Resources/banner.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/Resources/manual.md"
 )
 target_link_libraries(DSKSFzPlayer PRIVATE MyResources)
@@ -172,3 +170,50 @@ add_custom_command(TARGET DSKSFzPlayer_VST3 POST_BUILD
         "${CMAKE_CURRENT_BINARY_DIR}/DSKSFzPlayer_artefacts/$<CONFIG>/VST3/install_notes.md"
     COMMENT "Copying docs alongside VST3 bundle"
 )
+
+option(DSK_BUILD_TESTS "Build audio effect regression tests" OFF)
+if(DSK_BUILD_TESTS)
+    enable_testing()
+    add_executable(DSKModulationEffectsTest tests/ModulationEffectsTest.cpp)
+    target_include_directories(DSKModulationEffectsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKModulationEffectsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKModulationEffectsTest PRIVATE DSKSFzPlayer)
+    add_test(NAME ModulationEffects COMMAND DSKModulationEffectsTest)
+    add_executable(DSKLibrarySearchTest tests/LibrarySearchTest.cpp)
+    target_include_directories(DSKLibrarySearchTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKLibrarySearchTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKLibrarySearchTest PRIVATE DSKSFzPlayer)
+    add_test(NAME LibrarySearch COMMAND DSKLibrarySearchTest)
+    add_executable(DSKLibraryBrowserTest tests/LibraryBrowserTest.cpp)
+    target_include_directories(DSKLibraryBrowserTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKLibraryBrowserTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKLibraryBrowserTest PRIVATE DSKSFzPlayer)
+    add_test(NAME LibraryBrowser COMMAND DSKLibraryBrowserTest)
+    add_executable(DSKEditorControlsTest tests/EditorControlsTest.cpp)
+    target_include_directories(DSKEditorControlsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKEditorControlsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKEditorControlsTest PRIVATE DSKSFzPlayer)
+    add_test(NAME EditorControls COMMAND DSKEditorControlsTest)
+    add_executable(DSKAnimatedGifTest tests/AnimatedGifTest.cpp)
+    target_include_directories(DSKAnimatedGifTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKAnimatedGifTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKAnimatedGifTest PRIVATE DSKSFzPlayer)
+    add_test(NAME AnimatedGif COMMAND DSKAnimatedGifTest)
+    add_executable(DSKPerformanceControlsTest tests/PerformanceControlsTest.cpp)
+    target_include_directories(DSKPerformanceControlsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DSKPerformanceControlsTest PRIVATE
+        $<TARGET_PROPERTY:DSKSFzPlayer,COMPILE_DEFINITIONS>)
+    target_link_libraries(DSKPerformanceControlsTest PRIVATE DSKSFzPlayer)
+    add_test(NAME PerformanceControls COMMAND DSKPerformanceControlsTest)
+endif()

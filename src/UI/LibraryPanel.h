@@ -1,4 +1,7 @@
 #pragma once
+#include "LibrarySearch.h"
+#include "InstrumentNavigation.h"
+#include "SoundFontFolders.h"
 #include <JuceHeader.h>
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -41,6 +44,8 @@ public:
     std::function<void(const juce::File&, bool)>                    onFileActivated;
     std::function<void(const juce::File&, const juce::MouseEvent&)> onSFZRightClicked;
     std::function<void(const juce::File&)>                          onSFZPreview;
+
+    std::function<juce::String(const juce::File&)> displayName;
 
     LibraryTreeItem(Type t, const juce::File& f);
 
@@ -133,22 +138,6 @@ public:
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SearchResultsModel
-// ══════════════════════════════════════════════════════════════════════════════
-class SearchResultsModel : public juce::ListBoxModel
-{
-public:
-    struct Result { juce::String name; juce::String location; juce::File file; };
-
-    std::vector<Result>                  results;
-    std::function<void(const juce::File&)> onFileActivated;
-
-    int  getNumRows() override { return (int)results.size(); }
-    void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
-    void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
 // Evitamos que el TreeView robe el Drag & Drop
 // ══════════════════════════════════════════════════════════════════════════════
 class LibraryTreeView : public juce::TreeView
@@ -165,6 +154,8 @@ class LibraryPanel : public juce::Component,
     public juce::TextEditor::Listener
 {
 public:
+    void setInstrumentHidden(const LibrarySearch::Result& instrument, bool hidden)
+    { instrumentMetadata.setHidden(instrument.file, instrument.bank, instrument.program, hidden); metadataChanged(); }
     struct Listener
     {
         virtual ~Listener() = default;
@@ -177,9 +168,6 @@ public:
 
     void paint    (juce::Graphics& g)          override;
     void resized  ()                            override;
-    void mouseDown(const juce::MouseEvent& e)   override;
-    void mouseMove(const juce::MouseEvent& e)   override;
-    void mouseExit(const juce::MouseEvent& e)   override;
     void lookAndFeelChanged()                   override;
 
     void addListener   (Listener* l) { listeners.add(l); }
@@ -190,6 +178,26 @@ public:
 
     void addFolder(const juce::File& folder);
     void refreshTree();
+    void setLoadedInstrument(const LibrarySearch::Result& instrument);
+    std::function<void(int)> onPresetRequested;
+    std::function<void(int)> onPresetMenuRequested;
+    std::function<void()> onBankRenameRequested;
+    juce::String soundFontName(const juce::File& file, const juce::String& original,
+                              int bank = -1, int program = -1) const
+    { return soundFontNames.get(file, original, bank, program); }
+    InstrumentMetadata::Entry instrumentInfo(const LibrarySearch::Result& instrument) const
+    { return instrumentMetadata.get(instrument.file, instrument.bank, instrument.program); }
+    void setInstrumentRating(const LibrarySearch::Result&, int rating);
+    juce::String createSoundFontFolder(const juce::String& name);
+    void moveSoundFontToFolder(const juce::File&, const juce::String& folderId);
+    void removeSoundFontFolder(const juce::String& folderId);
+    void showCreateSoundFontFolder(const juce::File& file = {});
+
+    void showInstrumentMenu(const LibrarySearch::Result&, bool categoryOnly = false);
+    void showCategoryMenu(const LibrarySearch::Result& instrument) { showInstrumentMenu(instrument, true); }
+    void renameSoundFont(const juce::File&, const juce::String& original,
+                         int bank = -1, int program = -1);
+    std::function<void(const juce::File&, int, int)> onSoundFontPresetRequested;
 
     // called by editor drag & drop handler
     void addFolderDirect(const juce::File& folder) { addFolder(folder); }
@@ -205,18 +213,32 @@ public:
     std::function<void(const juce::File&)> onSFZPreviewRequested;
 
     void textEditorTextChanged(juce::TextEditor& editor) override;
+    bool navigateInstruments(const juce::KeyPress& key);
     void handleFileActivated(const juce::File& file, bool isZip);
     void showAddToFavoritesMenu(const juce::File& sfzFile, const juce::MouseEvent& e);
 
 private:
     juce::ListenerList<Listener> listeners;
 
-    juce::TextEditor searchBox;
+    InstrumentNavigationControl<juce::TextEditor> searchBox;
     juce::TextButton clearSearchBtn{ "X" };
     juce::TextButton addFolderBtn{ "+" };
     juce::TextButton removeFolderBtn{ "-" };
-    juce::TextButton refreshBtn{ "+/-" };
+    juce::TextButton refreshBtn{ "R" };
+    juce::TextButton newFolderBtn { "F+" };
     LibraryTreeView  treeView;
+    InstrumentNavigationControl<juce::TreeView> presetTree;
+    std::unique_ptr<juce::TreeViewItem> presetRoot;
+    juce::TextButton collapseAllBtn { "Collapse all" };
+    juce::TextButton previousPresetBtn { juce::String::fromUTF8("↑") };
+    juce::TextButton nextPresetBtn { juce::String::fromUTF8("↓") };
+    juce::Label presetsLabel;
+    LibrarySearch::Result loadedInstrument;
+    juce::StringArray additionalInstrumentFiles;
+    std::vector<LibrarySearch::Result> browserInstruments;
+    void rebuildInstrumentBrowser(std::vector<LibrarySearch::Result> instruments);
+    void selectBrowserInstrument(const LibrarySearch::Result&);
+    void activateBrowserInstrument(const LibrarySearch::Result&);
 
     std::unique_ptr<LibraryTreeItem> invisibleRoot;
     juce::StringArray                libraryFolderPaths;
@@ -224,8 +246,22 @@ private:
     FavoritesManager   favorites;
     FavoritesRootItem* favoritesRootItem { nullptr };
 
-    SearchResultsModel searchModel;
-    juce::ListBox      searchResultsList;
+    InstrumentMetadata instrumentMetadata;
+    juce::ComboBox categoryFilter, ratingFilter;
+    InstrumentMetadata::Filter currentFilter() const;
+    bool browsingResults() const;
+    void updateFilters();
+    void metadataChanged();
+    void updateSearch();
+    SoundFontNames soundFontNames;
+    SoundFontFolders soundFontFolders;
+    void foldersChanged();
+    void showSoundFontFolderMenu(const juce::String& id);
+    juce::PropertiesFile* nameSettings = nullptr;
+    juce::ThreadPool searchPool { 1 };
+    std::shared_ptr<std::atomic<int>> searchGeneration { std::make_shared<std::atomic<int>>(0) };
+    juce::Label searchStatus;
+
 
     void removeSelectedFolder();
     void runSearch(const juce::String& query);
@@ -235,13 +271,7 @@ private:
     juce::var buildConfigJson() const;
     int       applyConfigJson(const juce::var& root); // returns theme index or -1
 
-    juce::Rectangle<int> getBannerBounds() const;
-
     std::unique_ptr<juce::FileChooser> fileChooser;
-    juce::Image bannerImage;
-    juce::String bannerClickUrl { "https://www.dskmusic.com/high-quality-instruments/" }; // fallback si no hay banner remoto
-    std::shared_ptr<std::atomic<bool>> bannerStillAlive { std::make_shared<std::atomic<bool>>(true) };
-    void fetchRemoteBanner();
     juce::String savedTreeOpenState;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPanel)

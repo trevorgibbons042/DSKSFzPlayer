@@ -34,7 +34,7 @@ private:
     void rebuildFilteredList();
     void choose(int presetIndex);
 
-    const std::vector<SF2Synth::Preset>& allPresets;
+    const std::vector<SF2Synth::Preset> allPresets;
     int currentPresetIndex;
     std::vector<int> filtered; // indices into allPresets
     bool hasBankSelector = false;

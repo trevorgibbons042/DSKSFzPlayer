@@ -29,6 +29,22 @@ void EffectsChain::prepare(double sampleRate, int blockSize)
     chorus.setMix      (chorusMix);
     chorusPrepared = true;
 
+    phaser.setRate(phaserRate);
+    phaser.setDepth(phaserDepth);
+    phaser.setCentreFrequency(1000.0f);
+    phaser.setFeedback(0.35f);
+    phaser.setMix(phaserMix);
+    phaser.prepare(spec);
+
+    flanger.setRate(flangerRate);
+    // JUCE's chorus depth scales to +/-10 ms; limit this to +/-2 ms
+    // around 3 ms for a 1–5 ms flanging sweep, with resonant feedback.
+    flanger.setDepth(flangerDepth * 0.2f);
+    flanger.setCentreDelay(3.0f);
+    flanger.setFeedback(0.65f);
+    flanger.setMix(flangerMix);
+    flanger.prepare(spec);
+
     // Reverb
     reverb.prepare(spec);
     juce::dsp::Reverb::Parameters rp;
@@ -57,6 +73,8 @@ void EffectsChain::reset()
     std::fill(delayBufR.begin(), delayBufR.end(), 0.0f);
     delayWritePos = 0;
     chorus.reset();
+    phaser.reset();
+    flanger.reset();
     reverb.reset();
 }
 
@@ -78,6 +96,24 @@ void EffectsChain::process(juce::AudioBuffer<float>& buffer)
         juce::dsp::AudioBlock<float> block(buffer);
         juce::dsp::ProcessContextReplacing<float> ctx(block);
         chorus.process(ctx);
+    }
+    if (!phaserBypass && phaserMix > 0.001f)
+    {
+        phaser.setRate(phaserRate);
+        phaser.setDepth(phaserDepth);
+        phaser.setMix(phaserMix);
+        juce::dsp::AudioBlock<float> block(buffer);
+        juce::dsp::ProcessContextReplacing<float> ctx(block);
+        phaser.process(ctx);
+    }
+    if (!flangerBypass && flangerMix > 0.001f)
+    {
+        flanger.setRate(flangerRate);
+        flanger.setDepth(flangerDepth * 0.2f);
+        flanger.setMix(flangerMix);
+        juce::dsp::AudioBlock<float> block(buffer);
+        juce::dsp::ProcessContextReplacing<float> ctx(block);
+        flanger.process(ctx);
     }
     if (!delayBypass  && delayMix     > 0.001f) processDelay(buffer);
     if (!reverbBypass && reverbMix    > 0.001f)
@@ -154,21 +190,24 @@ void EffectsChain::processDelay(juce::AudioBuffer<float>& buf)
 void EffectsChain::updateEQ()
 {
     float sr = (float)currentSampleRate;
+    EQBandSettings bands { { eqLowFreq, eqMidFreq, eqHighFreq }, eqWidths };
+    bands.constrain(sr);
+    previousBands = bands;
 
     // Low shelf
-    auto lowCoeffs = IIRCoeffs::makeLowShelf(sr, eqLowFreq, 0.707f,
+    auto lowCoeffs = IIRCoeffs::makeLowShelf(sr, bands.frequencies[0], bands.q(0),
                                               juce::Decibels::decibelsToGain(eqLowGain));
     *eqLowL.coefficients = *lowCoeffs;
     *eqLowR.coefficients = *lowCoeffs;
 
     // Peak mid
-    auto midCoeffs = IIRCoeffs::makePeakFilter(sr, eqMidFreq, 0.707f,
+    auto midCoeffs = IIRCoeffs::makePeakFilter(sr, bands.frequencies[1], bands.q(1),
                                                 juce::Decibels::decibelsToGain(eqMidGain));
     *eqMidL.coefficients = *midCoeffs;
     *eqMidR.coefficients = *midCoeffs;
 
     // High shelf
-    auto highCoeffs = IIRCoeffs::makeHighShelf(sr, eqHighFreq, 0.707f,
+    auto highCoeffs = IIRCoeffs::makeHighShelf(sr, bands.frequencies[2], bands.q(2),
                                                 juce::Decibels::decibelsToGain(eqHighGain));
     *eqHighL.coefficients = *highCoeffs;
     *eqHighR.coefficients = *highCoeffs;
@@ -183,10 +222,12 @@ void EffectsChain::updateEQ()
 // ──────────────────────────────────────────────────────────────────────────────
 void EffectsChain::processEQ(juce::AudioBuffer<float>& buf)
 {
+    EQBandSettings bands { { eqLowFreq, eqMidFreq, eqHighFreq }, eqWidths };
+    bands.constrain(currentSampleRate);
     // Recalcular solo si cambiaron los valores
     if (std::abs(eqLowGain  - prevEqLow)  > 0.01f ||
         std::abs(eqMidGain  - prevEqMid)  > 0.01f ||
-        std::abs(eqHighGain - prevEqHigh) > 0.01f)
+        std::abs(eqHighGain - prevEqHigh) > 0.01f || bands != previousBands)
         updateEQ();
 
     // Si todos los gains son 0, no procesar

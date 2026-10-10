@@ -1,7 +1,5 @@
 #include <JuceHeader.h>
 #include "PluginEditor.h"
-#include "UI/SF2PresetPicker.h"
-#include "UI/DSPresetPicker.h"
 
 // ── Help dialog ───────────────────────────────────────────────────────────────
 class HelpDialog : public juce::Component
@@ -62,7 +60,7 @@ static constexpr int ROW_H = KNOB_Y + KSZ + 16 + 10;
 static constexpr int FTR_H = 30;
 static constexpr int KB_H = 56;
 static constexpr int VDIV_H = 6; // Altura del tirador horizontal
-static constexpr int DEF_H = HDR_H + 3 * ROW_H + FTR_H + VDIV_H + KB_H;
+static constexpr int DEF_H = HDR_H + 4 * ROW_H + FTR_H + VDIV_H + KB_H;
 // Alto de arranque por defecto: un poco más alto que el mínimo compacto (DEF_H)
 // para dar más espacio vertical a la Librería al abrir el plugin por primera vez.
 static constexpr int DEF_STARTUP_H = DEF_H + 90;
@@ -131,13 +129,22 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
     setLookAndFeel(&lf);
 
     pluginHeight = DEF_STARTUP_H;
+    expandedVisualHeight = 90;
 
     // Restore saved theme before buildUI so colours are applied immediately
     if (auto* s = proc.getAppProperties().getUserSettings())
     {
         lf.setTheme(s->getIntValue("uiTheme", 0));
-        libWidth = juce::jlimit(120, 450, s->getIntValue("libWidth", LIB_W));
+        guiScale = juce::jlimit(0.5f, 2.0f, (float) s->getDoubleValue("guiScale", 1.0));
+        libWidth = juce::jlimit(120, 600, s->getIntValue("libWidth", LIB_W));
+        pluginWidth = juce::jlimit(710, 4000, s->getIntValue("pluginWidth", libWidth + 780));
         pluginHeight = juce::jlimit(DEF_H, 1200, s->getIntValue("pluginHeight", DEF_STARTUP_H));
+        visualHeight = juce::jlimit(0, 1200, s->getIntValue("visualHeight", juce::jmax(0, pluginHeight - DEF_H)));
+        expandedVisualHeight = juce::jlimit(1, 1200, s->getIntValue("expandedVisualHeight", 90));
+        juce::StringArray gifs;
+        const auto savedGifs = juce::JSON::parse(s->getValue("visualGifs"));
+        if (const auto* paths = savedGifs.getArray()) for (const auto& path : *paths) gifs.add(path.toString());
+        visualizer.restoreGifs(gifs, s->getValue("visualGif"));
         visualizer.setStyle(s->getIntValue("vizStyle", (int)AudioVisualizer::Style::Spectrum));
         libraryPanel.loadState(*s);
     }
@@ -145,6 +152,39 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
     buildUI();
 
     libraryPanel.addListener(this);
+    libraryPanel.onPresetRequested = [this](int index)
+    {
+        if (proc.isLoadingInstrument.load()) return;
+        if (proc.isSF2Loaded()) proc.selectSF2Preset(index);
+        else if (proc.isDSLoaded()) proc.selectDSPreset(index);
+        timerCallback();
+    };
+    libraryPanel.onSoundFontPresetRequested = [this](const juce::File& file, int bank, int program)
+    {
+        loadLibraryInstrument(file, bank, program);
+    };
+    libraryPanel.onBankRenameRequested = [this]
+    {
+        if (proc.isLoadingInstrument.load() || !proc.isSF2Loaded()) return;
+        const auto file = proc.getCurrentSFZFile();
+        libraryPanel.renameSoundFont(file, file.getFileNameWithoutExtension());
+    };
+    libraryPanel.onPresetMenuRequested = [this](int index)
+    {
+        if (proc.isLoadingInstrument.load()) return;
+        if (proc.isDSLoaded())
+        {
+            const auto& files = proc.getDSPresetList();
+            if (index >= 0 && index < (int) files.size())
+                libraryPanel.showInstrumentMenu({ files[(size_t) index].getFileNameWithoutExtension(), {}, files[(size_t) index] });
+            return;
+        }
+        if (!proc.isSF2Loaded()) return;
+        const auto& presets = proc.getSF2Presets();
+        if (index < 0 || index >= (int) presets.size()) return;
+        const auto& preset = presets[(size_t) index];
+        libraryPanel.showInstrumentMenu({ preset.name, {}, proc.getCurrentSFZFile(), preset.bank, preset.presetNumber });
+    };
     libraryPanel.onThemeChanged = [this](int idx)
     {
         lf.setTheme(idx);
@@ -161,7 +201,7 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
             loadInstrumentForPreview(f);
     };
 
-    setSize(libWidth + 780, pluginHeight);
+    setSize(pluginWidth, pluginHeight);
 
     // Habilitar redimensión/maximizado SOLO en Standalone
     if (proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
@@ -185,19 +225,30 @@ DSKSFzEditor::DSKSFzEditor(DSKSFzProcessor& p)
     }
 
     applyWindowConstraints();
+    setGuiScale(guiScale);
 
     startTimerHz(12);
 }
 
 DSKSFzEditor::~DSKSFzEditor()
 {
+    ++loadGeneration;
+    libraryLoadPool.removeAllJobs(true, -1);
     stopTimer();
     libraryPanel.removeListener(this);
     if (auto* s = proc.getAppProperties().getUserSettings())
     {
         s->setValue("uiTheme", lf.getThemeIndex());
+        s->setValue("guiScale", guiScale);
         s->setValue("libWidth", libWidth);
+        s->setValue("pluginWidth", getWidth());
         s->setValue("pluginHeight", pluginHeight);
+        juce::Array<juce::var> gifPaths;
+        for (const auto& path : visualizer.getGifPaths()) gifPaths.add(path);
+        s->setValue("visualGifs", juce::JSON::toString(juce::var(gifPaths)));
+        s->setValue("visualGif", visualizer.getGifPath());
+        s->setValue("visualHeight", visualHeight);
+        s->setValue("expandedVisualHeight", expandedVisualHeight);
         s->setValue("vizStyle", visualizer.getStyle());
         libraryPanel.saveState(*s);
         s->saveIfNeeded();
@@ -211,6 +262,7 @@ void DSKSFzEditor::lookAndFeelChanged()
     const auto& t = lf.getTheme();
 
     instrNameLabel.setColour(juce::Label::textColourId, t.lcdText);
+    bankNameLabel.setColour(juce::Label::textColourId, t.subtext);
     statusLabel.setColour(juce::Label::textColourId, t.subtext);
     titleLink.setColour(juce::HyperlinkButton::textColourId, t.accent);
     siteLink.setColour(juce::HyperlinkButton::textColourId, t.subtext);
@@ -219,23 +271,32 @@ void DSKSFzEditor::lookAndFeelChanged()
     openBtn.setColour(juce::TextButton::textColourOffId, t.accent);
     optionsBtn.setColour(juce::TextButton::buttonColourId, t.sectionBg);
     optionsBtn.setColour(juce::TextButton::textColourOffId, t.subtext);
-    addFavBtn.setColour(juce::TextButton::buttonColourId, t.sectionBg);
-    addFavBtn.setColour(juce::TextButton::textColourOffId, t.favGold);
+    for (auto& button : bankRatingButtons)
+        button.setColour(juce::TextButton::textColourOffId, t.favGold);
+    for (auto& button : ratingButtons)
+    {
+        button.setColour(juce::TextButton::buttonColourId, t.sectionBg);
+        button.setColour(juce::TextButton::textColourOffId, t.favGold);
+    }
+    categoryButton.setColour(juce::TextButton::buttonColourId, t.sectionBg);
+    categoryButton.setColour(juce::TextButton::textColourOffId, t.accent);
     rrResetBtn.setColour(juce::TextButton::buttonColourId, t.sectionBg);
     rrResetBtn.setColour(juce::TextButton::textColourOffId, t.subtext);
     voicesKnob.setColour(juce::Slider::textBoxTextColourId, t.text);
 
-    const juce::Colour wKey = t.isDark ? juce::Colour(0xFFD8E8F0) : juce::Colour(0xFFF8F8F8);
-    const juce::Colour bKey = t.isDark ? juce::Colour(0xFF0D1828) : juce::Colour(0xFF1A1A2A);
+    const juce::Colour wKey = t.isDark ? t.sectionBg.brighter(0.22f) : juce::Colour(0xFFF8F8F8);
+    const juce::Colour bKey = t.isDark ? t.editorBg.darker(0.65f) : juce::Colour(0xFF1A1A2A);
     keyboard.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, wKey);
     keyboard.setColour(juce::MidiKeyboardComponent::blackNoteColourId, bKey);
     keyboard.setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, t.accent.withAlpha(0.2f));
     keyboard.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, t.accent.withAlpha(0.5f));
     keyboard.setColour(juce::MidiKeyboardComponent::keySeparatorLineColourId, t.border);
+    keyboard.setColour(juce::MidiKeyboardComponent::textLabelColourId, t.isDark ? t.text : juce::Colours::black);
+    keyboard.setColour(juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha(t.isDark ? 0.35f : 0.2f));
 
     const juce::Colour fxBtnBg = t.isDark ? juce::Colour(0xFF1A2438) : t.sectionBg;
     const juce::Colour fxBtnBgOn = t.sectionBg.brighter(0.2f);
-    for (auto* b : { &driveOnBtn, &chorusOnBtn, &delayOnBtn, &reverbOnBtn, &eqOnBtn })
+    for (auto* b : { &driveOnBtn, &chorusOnBtn, &phaserOnBtn, &flangerOnBtn, &delayOnBtn, &reverbOnBtn, &eqOnBtn })
     {
         b->setColour(juce::TextButton::buttonColourId, fxBtnBg);
         b->setColour(juce::TextButton::buttonOnColourId, fxBtnBgOn);
@@ -279,7 +340,12 @@ void DSKSFzEditor::addKL(juce::Slider& s, const juce::String& text)
 
 void DSKSFzEditor::mkFXBtn(juce::TextButton& b, const juce::String& name)
 {
-    b.setButtonText(name);
+    b.setName(name);
+    b.setButtonText(name + " OFF");
+    b.onStateChange = [&b, name]()
+    {
+        b.setButtonText(name + (b.getToggleState() ? " ON" : " OFF"));
+    };
     b.setClickingTogglesState(true);
     b.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF1A2438));
     b.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xFF00556E));
@@ -291,6 +357,7 @@ void DSKSFzEditor::mkFXBtn(juce::TextButton& b, const juce::String& name)
 
 void DSKSFzEditor::sa(juce::Slider& s, const juce::String& id)
 {
+    if (auto* parameter = proc.params.getParameter(id)) s.setName(parameter->getName(128));
     sAttach.push_back(std::make_unique<SA>(proc.params, id, s));
 }
 
@@ -312,7 +379,7 @@ bool DSKSFzEditor::isNearDivider(int x) const
 
 bool DSKSFzEditor::isNearHDivider(int y) const
 {
-    return y >= getHeight() - KB_H - VDIV_H && y <= getHeight() - KB_H;
+    return visualizer.isVisible() && y >= visualizer.getY() - FTR_H - VDIV_H && y < visualizer.getY() - FTR_H;
 }
 
 // ── buildUI ───────────────────────────────────────────────────────────────────
@@ -330,9 +397,21 @@ void DSKSFzEditor::buildUI()
 
     instrNameLabel.setFont(juce::Font(16.0f, juce::Font::bold)); // Aumentamos la fuente de 13 a 16
     instrNameLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF00E6CC));
-    instrNameLabel.setJustificationType(juce::Justification::centred);
+    instrNameLabel.setJustificationType(juce::Justification::centredLeft);
     instrNameLabel.setText("No instrument loaded", juce::dontSendNotification);
     addAndMakeVisible(instrNameLabel);
+    bankNameLabel.setFont(juce::Font(12.0f));
+    bankNameLabel.setJustificationType(juce::Justification::centredLeft);
+    bankNameLabel.setTooltip("Click to rename SoundFont");
+    bankNameLabel.onClick = [this]
+    {
+        if (!proc.isLoadingInstrument.load() && proc.isSF2Loaded())
+        {
+            const auto file = proc.getCurrentSFZFile();
+            libraryPanel.renameSoundFont(file, file.getFileNameWithoutExtension());
+        }
+    };
+    addAndMakeVisible(bankNameLabel);
 
     statusLabel.setFont(juce::Font(10.0f));
     statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF7799BB));
@@ -340,21 +419,44 @@ void DSKSFzEditor::buildUI()
     statusLabel.setText("Ready", juce::dontSendNotification);
     addAndMakeVisible(statusLabel);
 
-    addFavBtn.setTooltip("Add current instrument to Favorites / Añadir a favoritos");
-    addFavBtn.onFavClick = [this](const juce::MouseEvent& e)
+    for (size_t i = 0; i < ratingButtons.size(); ++i)
     {
-        auto f = proc.getCurrentSFZFile();
-        if (f.existsAsFile())
+        auto& button = ratingButtons[i];
+        button.setButtonText(juce::String::fromUTF8("☆"));
+        button.setTooltip("Rate " + juce::String((int) i + 1) + " stars; click the same rating to clear");
+        button.onClick = [this, i]
         {
-            libraryPanel.showAddToFavoritesMenu(f, e); // Ahora sí le pasamos el evento real
-        }
-        else
+            const auto instrument = currentLibraryInstrument();
+            if (instrument.file == juce::File()) return;
+            const int rating = (int) i + 1;
+            libraryPanel.setInstrumentRating(instrument,
+                libraryPanel.instrumentInfo(instrument).rating == rating ? 0 : rating);
+            timerCallback();
+        };
+        addAndMakeVisible(button);
+    }
+    for (size_t i = 0; i < bankRatingButtons.size(); ++i)
+    {
+        auto& button = bankRatingButtons[i];
+        button.setComponentID("bank-rating");
+        button.setTooltip("Rate SoundFont " + juce::String((int) i + 1) + " stars; click again to clear");
+        button.onClick = [this, i]
         {
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                "Favorites", "No instrument loaded to add to favorites.");
-        }
+            if (proc.isLoadingInstrument.load() || !proc.isSF2Loaded()) return;
+            const LibrarySearch::Result bank { {}, {}, proc.getCurrentSFZFile() };
+            const int rating = (int) i + 1;
+            libraryPanel.setInstrumentRating(bank, libraryPanel.instrumentInfo(bank).rating == rating ? 0 : rating);
+            timerCallback();
+        };
+        addAndMakeVisible(button);
+    }
+    categoryButton.setTooltip("Set instrument category");
+    categoryButton.onClick = [this]
+    {
+        const auto instrument = currentLibraryInstrument();
+        if (instrument.file != juce::File()) libraryPanel.showCategoryMenu(instrument);
     };
-    addAndMakeVisible(addFavBtn);
+    addAndMakeVisible(categoryButton);
 
     openBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF0F3460));
     openBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xFF00D4FF));
@@ -396,6 +498,14 @@ void DSKSFzEditor::buildUI()
 
         juce::PopupMenu menu;
         menu.addSectionHeader("DSK SFz player");
+        if (standaloneOption)
+        {
+            menu.addItem(2001, "Audio / MIDI settings...");
+            menu.addItem(2002, "Save plugin state...");
+            menu.addItem(2003, "Load plugin state...");
+            menu.addItem(2004, "Reset plugin state");
+            menu.addSeparator();
+        }
         menu.addItem(1, "All notes off");
         menu.addItem(2, "Reset round-robin counters");
         menu.addSeparator();
@@ -407,6 +517,12 @@ void DSKSFzEditor::buildUI()
         menu.addItem(11, "Import config...");
         menu.addSeparator();
         menu.addSubMenu("Theme", themeMenu);
+        juce::PopupMenu scaleMenu;
+        for (const int percent : { 50, 75, 90, 100, 110, 125, 150, 175, 200 })
+            scaleMenu.addItem(1000 + percent, juce::String(percent) + "%",
+                (float) percent / 100.0f <= maximumGuiScale(),
+                juce::roundToInt(guiScale * 100.0f) == percent);
+        menu.addSubMenu("GUI Scale", scaleMenu);
         menu.addSeparator();
         menu.addItem(5, "Help...");
         menu.addItem(4, "About...");
@@ -417,7 +533,12 @@ void DSKSFzEditor::buildUI()
             .withTargetComponent(&optionsBtn),
             [this](int r)
             {
-                if (r == 1)
+                if (r >= 2001 && r <= 2004 && standaloneOption) { auto action = standaloneOption; action(r - 2000); }
+                else if (r >= 1050 && r <= 1200)
+                {
+                    setGuiScale((float) (r - 1000) / 100.0f);
+                }
+                else if (r == 1)
                 {
                     proc.allNotesOff();
                 }
@@ -445,8 +566,9 @@ void DSKSFzEditor::buildUI()
                                 // 2. Restaurar las dimensiones por defecto de la interfaz
                                 libWidth = LIB_W;
                                 pluginHeight = DEF_STARTUP_H;
-                                setSize(libWidth + 780, pluginHeight);
+                                setSize(pluginWidth, pluginHeight);
                                 applyWindowConstraints();
+                                setGuiScale(1.0f);
                             }
                         });
                 }
@@ -528,6 +650,10 @@ void DSKSFzEditor::buildUI()
     pitchFineKnob.setTooltip("Fine tune in cents");
     mk(pitchFineKnob); addKL(pitchFineKnob, "Cents");
     sa(pitchFineKnob, "fineTune");
+    glideKnob.setRange(0.0, 2000.0, 1.0);
+    glideKnob.setTooltip("Glide between notes in milliseconds. 0 = off. Use Voices = 1 for solo slides.");
+    mk(glideKnob); addKL(glideKnob, "Glide ms");
+    sa(glideKnob, "glideTime");
 
     ampAKnob.setRange(0.001, 10.0, 0.001);
     ampAKnob.setTooltip("Amp Attack (seconds)");
@@ -585,6 +711,13 @@ void DSKSFzEditor::buildUI()
     filtRKnob.setTooltip("Filter env Release"); sa(filtRKnob, "filterRelease");
 
     // ── MOD section ───────────────────────────────────────────────────────────
+    modWheelBox.addItem("Wheel: Off", 1);
+    modWheelBox.addItem("Wheel: LFO 1", 2);
+    modWheelBox.addItem("Wheel: LFO 2", 3);
+    modWheelBox.addItem("Wheel: Both", 4);
+    modWheelBox.setTooltip("MIDI mod wheel (CC1) controls LFO depth from zero up to the Depth knob setting.");
+    addAndMakeVisible(modWheelBox);
+    ca(modWheelBox, "modWheelTarget");
     auto buildLFO = [&](juce::ComboBox& shp, juce::ComboBox& tgt,
         juce::Slider& rate, juce::Slider& amt,
         const juce::String& shpId, const juce::String& tgtId,
@@ -611,6 +744,9 @@ void DSKSFzEditor::buildUI()
     // ── FX section ────────────────────────────────────────────────────────────
     mkFXBtn(driveOnBtn, "DRIVE");
     mkFXBtn(chorusOnBtn, "CHORUS");
+    mkFXBtn(phaserOnBtn, "PHASER");
+    mkFXBtn(flangerOnBtn, "FLANGER");
+    ba(phaserOnBtn, "phaserOn"); ba(flangerOnBtn, "flangerOn");
     mkFXBtn(delayOnBtn, "DELAY");
     mkFXBtn(reverbOnBtn, "REVERB");
     mkFXBtn(eqOnBtn, "EQ");
@@ -627,6 +763,19 @@ void DSKSFzEditor::buildUI()
     choMixKnob.setRange(0.0, 1.0, 0.001);   mk(choMixKnob);   addKL(choMixKnob, "Mix");
     sa(choRateKnob, "chorusRate"); sa(choDepthKnob, "chorusDepth"); sa(choMixKnob, "chorusMix");
 
+    phaRateKnob.setRange(0.1, 10.0, 0.01); mk(phaRateKnob); addKL(phaRateKnob, "Rate");
+    sa(phaRateKnob, "phaserRate");
+    phaDepthKnob.setRange(0.0, 1.0, 0.001); mk(phaDepthKnob); addKL(phaDepthKnob, "Depth");
+    sa(phaDepthKnob, "phaserDepth");
+    phaMixKnob.setRange(0.0, 1.0, 0.001); mk(phaMixKnob); addKL(phaMixKnob, "Mix");
+    sa(phaMixKnob, "phaserMix");
+    flgRateKnob.setRange(0.1, 10.0, 0.01); mk(flgRateKnob); addKL(flgRateKnob, "Rate");
+    sa(flgRateKnob, "flangerRate");
+    flgDepthKnob.setRange(0.0, 1.0, 0.001); mk(flgDepthKnob); addKL(flgDepthKnob, "Depth");
+    sa(flgDepthKnob, "flangerDepth");
+    flgMixKnob.setRange(0.0, 1.0, 0.001); mk(flgMixKnob); addKL(flgMixKnob, "Mix");
+    sa(flgMixKnob, "flangerMix");
+
     delTimeKnob.setRange(1.0, 2000.0, 1.0); mk(delTimeKnob); addKL(delTimeKnob, "Time");
     delFbkKnob.setRange(0.0, 0.95, 0.001);  mk(delFbkKnob);  addKL(delFbkKnob, "Fbk");
     delMixKnob.setRange(0.0, 1.0, 0.001);   mk(delMixKnob);  addKL(delMixKnob, "Mix");
@@ -637,20 +786,38 @@ void DSKSFzEditor::buildUI()
     revMixKnob.setRange(0.0, 1.0, 0.001);  mk(revMixKnob);  addKL(revMixKnob, "Mix");
     sa(revSizeKnob, "reverbSize"); sa(revDampKnob, "reverbDamping"); sa(revMixKnob, "reverbMix");
 
+    // Enable an effect when its controls are adjusted by the user. Using the
+    // gesture callback leaves preset restoration and host automation alone.
+    const auto enableOnAdjust = [](juce::TextButton& button,
+                                   std::initializer_list<juce::Slider*> knobs)
+    {
+        for (auto* knob : knobs)
+            knob->onDragStart = [&button]()
+            {
+                button.setToggleState(true, juce::sendNotification);
+            };
+    };
+    enableOnAdjust(chorusOnBtn, { &choRateKnob, &choDepthKnob, &choMixKnob });
+    enableOnAdjust(phaserOnBtn, { &phaRateKnob, &phaDepthKnob, &phaMixKnob });
+    enableOnAdjust(flangerOnBtn, { &flgRateKnob, &flgDepthKnob, &flgMixKnob });
+    enableOnAdjust(delayOnBtn, { &delTimeKnob, &delFbkKnob, &delMixKnob });
+    enableOnAdjust(reverbOnBtn, { &revSizeKnob, &revDampKnob, &revMixKnob });
+
     eqLowKnob.setRange(-12.0, 12.0, 0.1);  eqLowKnob.setComponentID("bipolar");
     eqMidKnob.setRange(-12.0, 12.0, 0.1);  eqMidKnob.setComponentID("bipolar");
     eqHighKnob.setRange(-12.0, 12.0, 0.1); eqHighKnob.setComponentID("bipolar");
     mk(eqLowKnob); addKL(eqLowKnob, "Low");
     mk(eqMidKnob); addKL(eqMidKnob, "Mid");
     mk(eqHighKnob); addKL(eqHighKnob, "High");
+    enableOnAdjust(eqOnBtn, { &eqLowKnob, &eqMidKnob, &eqHighKnob });
     sa(eqLowKnob, "eqLow"); sa(eqMidKnob, "eqMid"); sa(eqHighKnob, "eqHigh");
 
     // ── Footer ────────────────────────────────────────────────────────────────
     voicesKnob.setRange(1, 64, 1);
     voicesKnob.setSliderStyle(juce::Slider::LinearHorizontal);
-    voicesKnob.setTextBoxStyle(juce::Slider::TextBoxRight, false, 28, 16);
+    voicesKnob.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 20);
     voicesKnob.setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xFFCCDDEE));
-    voicesKnob.setTooltip("Max polyphony (voices)");
+    voicesKnob.setTooltip("Max polyphony (1–64 voices). Type a whole number and press Enter; right-click for numeric entry.");
     addAndMakeVisible(voicesKnob);
     sa(voicesKnob, "maxVoices");
 
@@ -669,10 +836,46 @@ void DSKSFzEditor::buildUI()
 
     // ── Visualizer ────────────────────────────────────────────────────────────
     addAndMakeVisible(visualizer);
-    visualizer.onStyleChanged = [this](int)
+    visualizer.getEQDisplay().onBandGesture = [this](int band, bool starting)
+    {
+        const juce::String names[] = { "Low", "Mid", "High" };
+        const juce::String gainIds[] = { "eqLow", "eqMid", "eqHigh" };
+        for (const auto& id : { "eq" + names[band] + "Freq", gainIds[band], "eq" + names[band] + "Width" })
+            if (auto* parameter = proc.params.getParameter(id))
+            { if (starting) parameter->beginChangeGesture(); else parameter->endChangeGesture(); }
+    };
+    visualizer.getEQDisplay().onBandEdit = [this](int band, float frequency, float gain, float width)
+    {
+        const juce::String names[] = { "Low", "Mid", "High" };
+        const auto set = [this](const juce::String& id, float value)
+        {
+            if (auto* parameter = proc.params.getParameter(id))
+                parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
+        };
+        set("eq" + names[band] + "Freq", frequency);
+        set("eq" + names[band], gain);
+        set("eq" + names[band] + "Width", width);
+        if (auto* on = proc.params.getParameter("eqOn"))
+            if (on->getValue() < 0.5f)
+            { on->beginChangeGesture(); on->setValueNotifyingHost(1.0f); on->endChangeGesture(); }
+    };
+    visualizer.onStyleChanged = [this](int style)
+    {
+        if (visualHeight == 0 || (style == (int) AudioVisualizer::Style::EQ && visualHeight < 64))
+            setVoicesVisualHeight(style == (int) AudioVisualizer::Style::EQ ? 90 : 64);
+        if (auto* s = proc.getAppProperties().getUserSettings())
+        { s->setValue("vizStyle", visualizer.getStyle()); s->saveIfNeeded(); }
+    };
+    visualizer.onGifLibraryChanged = [this]
     {
         if (auto* s = proc.getAppProperties().getUserSettings())
-            s->setValue("vizStyle", visualizer.getStyle());
+        {
+            juce::Array<juce::var> paths;
+            for (const auto& path : visualizer.getGifPaths()) paths.add(path);
+            s->setValue("visualGifs", juce::JSON::toString(juce::var(paths)));
+            s->setValue("visualGif", visualizer.getGifPath());
+            s->saveIfNeeded();
+        }
     };
 
     // ── Piano keyboard ────────────────────────────────────────────────────────
@@ -688,8 +891,9 @@ void DSKSFzEditor::buildUI()
 
     setWantsKeyboardFocus(true);
 
-    // Apply current theme colours to all per-component overrides
-    lookAndFeelChanged();
+    // Refresh the complete component tree after attaching children: library
+    // controls may still hold colours from their standalone construction.
+    sendLookAndFeelChange();
 }
 
 // ── Paint ─────────────────────────────────────────────────────────────────────
@@ -740,10 +944,13 @@ void DSKSFzEditor::paint(juce::Graphics& g)
 
     g.fillAll(t.editorBg);
 
-    const int W = getWidth();
-    const int H = getHeight();
+    g.saveState();
+    const float controlsScale = juce::jmin(1.0f, (float) (getWidth() - libWidth - VDIV_H) / 780.0f);
+    g.addTransform(juce::AffineTransform::scale(controlsScale)
+        .translated(libWidth * (1.0f - controlsScale) + VDIV_H, 0.0f));
+    const int W = libWidth + juce::jmax(780, getWidth() - libWidth - VDIV_H);
     const int rx = libWidth;
-    const int rw = 780; // Fijo visualmente a 780px para no desparramar controles
+    const int rw = juce::jmax(780, getWidth() - libWidth - VDIV_H); // Fijo visualmente a 780px para no desparramar controles
 
     // Header bar (Extendemos el fondo hasta W para ocultar el hueco)
     g.setColour(t.headerBg);
@@ -756,7 +963,8 @@ void DSKSFzEditor::paint(juce::Graphics& g)
     const int S0 = HDR_H;
     const int S1 = S0 + ROW_H;
     const int S2 = S1 + ROW_H;
-    const int SF = S2 + ROW_H;
+    const float footerScale = juce::jmin(1.0f, (float) (getWidth() - libWidth - VDIV_H) / 780.0f);
+    const int SF = juce::roundToInt((getHeight() - KB_H - juce::jmin(visualHeight, juce::jmax(0, getHeight() - DEF_H)) - FTR_H) / footerScale);
 
     auto secR = [&](int sy) { return juce::Rectangle<int>(rx + 3, sy + 2, rw - 6, ROW_H - 4); };
     secBg(g, secR(S0), "AMP");
@@ -773,7 +981,8 @@ void DSKSFzEditor::paint(juce::Graphics& g)
         g.drawText("MOD", divX + 6, r.getY() + 2, 80, 14, juce::Justification::centredLeft);
     }
 
-    secBg(g, secR(S2), "FX");
+    secBg(g, secR(S2), "");
+    secBg(g, secR(S2 + ROW_H), "");
 
     // Footer strip (Extendemos el fondo hasta W)
     g.setColour(t.footerBg);
@@ -782,20 +991,6 @@ void DSKSFzEditor::paint(juce::Graphics& g)
     g.setFont(juce::Font(11.0f, juce::Font::bold));
     g.drawText("Voices:", rx + 10, SF + 7, 56, 16, juce::Justification::centredLeft);
 
-    // Library divider (drawn slightly wider so user can grab it)
-    g.setColour(t.accent.withAlpha(0.25f));
-    g.fillRect(libWidth, 0, 2, H - KB_H - VDIV_H);
-    g.setColour(t.divider);
-    g.drawLine((float)libWidth, 0.0f, (float)libWidth, (float)(H - KB_H - VDIV_H), 1.0f);
-
-    // Horizontal divider (Separador de teclado / redimensionador vertical)
-    const int divY = H - KB_H - VDIV_H;
-    g.setColour(t.accent.withAlpha(0.12f));
-    g.fillRect(0, divY, W, VDIV_H);
-    g.setColour(t.divider);
-    g.drawLine(0.0f, (float)divY, (float)W, (float)divY, 1.0f);
-    g.drawLine(0.0f, (float)(divY + VDIV_H), (float)W, (float)(divY + VDIV_H), 1.0f);
-
     // Meters
     const int mW = 10, mGap = 4;
     const int mX = rx + rw - 2 * (mW + mGap) - 4;
@@ -803,6 +998,20 @@ void DSKSFzEditor::paint(juce::Graphics& g)
     const int mH = KSZ + 16;
     drawMeter(g, mX, mY, mW, mH, meterL.load(), "L");
     drawMeter(g, mX + mW + mGap, mY, mW, mH, meterR.load(), "R");
+    g.restoreState();
+    const int H = getHeight();
+    g.setColour(t.divider);
+    g.fillRect(libWidth, 0, VDIV_H, H - KB_H);
+    const int divY = visualizer.getY() - FTR_H - VDIV_H;
+    if (visualizer.isVisible())
+    {
+        g.setColour(t.sectionBg);
+        g.fillRect(libWidth + VDIV_H, divY, getWidth() - libWidth - VDIV_H, VDIV_H);
+        g.setColour(t.accent.withAlpha(0.6f));
+        const int centre = (libWidth + getWidth()) / 2;
+        g.drawLine((float) centre - 20, (float) divY + 3, (float) centre + 20, (float) divY + 3, 2.0f);
+    }
+
 }
 
 // ── overlay visual sobre TODOS los componentes ────────────────────────────────
@@ -827,7 +1036,7 @@ void DSKSFzEditor::paintOverChildren(juce::Graphics& g)
 
         g.setColour(t.accent);
         g.setFont(juce::Font(18.0f, juce::Font::bold));
-        g.drawText("Drop SFZ/SF2 file, folder, or ZIP pack",
+        g.drawText("Drop an instrument, GIF, folder, or ZIP",
             getLocalBounds(), juce::Justification::centred);
     }
 }
@@ -835,27 +1044,25 @@ void DSKSFzEditor::paintOverChildren(juce::Graphics& g)
 // ── resized ───────────────────────────────────────────────────────────────────
 void DSKSFzEditor::resized()
 {
-    // Si la ventana fue redimensionada por el OS (ej. al maximizar en Standalone)
-    // calculamos libWidth para que la parte derecha NUNCA pase de 780px
-    if (getWidth() != libWidth + 780 || getHeight() != pluginHeight)
-    {
-        libWidth = juce::jmax(120, getWidth() - 780);
-        pluginHeight = juce::jmax(DEF_H, getHeight());
-    }
+    // Keep the split independent of host/OS window dimensions.
+    libWidth = juce::jlimit(120, juce::jmax(120, juce::jmin(600, getWidth() - 590)), libWidth);
+    pluginWidth = getWidth();
+    pluginHeight = getHeight();
 
     const int W = getWidth();
     const int H = getHeight();
     const int rx = libWidth;
-    const int rw = 780; // Fijo a 780px para que los knobs se queden agrupados
+    const int rw = juce::jmax(780, getWidth() - libWidth - VDIV_H); // Fijo a 780px para que los knobs se queden agrupados
 
     // Los controles de la derecha conservan su posición Y anclada respecto a la parte superior
     const int S0 = HDR_H;
     const int S1 = S0 + ROW_H;
     const int S2 = S1 + ROW_H;
-    const int SF = S2 + ROW_H;
+    const float footerScale = juce::jmin(1.0f, (float) (getWidth() - libWidth - VDIV_H) / 780.0f);
+    const int SF = juce::roundToInt((getHeight() - KB_H - juce::jmin(visualHeight, juce::jmax(0, getHeight() - DEF_H)) - FTR_H) / footerScale);
 
     // La librería ocupa todo el alto hasta el tirador horizontal
-    libraryPanel.setBounds(0, 0, libWidth, H - KB_H - VDIV_H);
+    libraryPanel.setBounds(0, 0, libWidth, H - KB_H);
     keyboard.setBounds(0, H - KB_H, W, KB_H);
     keyboard.setKeyWidth(juce::jmax(10.0f, (float)W / 52.0f));
 
@@ -863,14 +1070,19 @@ void DSKSFzEditor::resized()
     titleLink.setBounds(hdrLabelX, 4, 160, 24);
     siteLink.setBounds(hdrLabelX, 28, 120, 16);
     const int openBtnW = 160; // ancho aumentado para que el texto largo no se vea diminuto
-    const int openBtnX = rx + 780 - 94 - openBtnW;
-    openBtn.setBounds(openBtnX, 10, openBtnW, 28);
-    optionsBtn.setBounds(rx + rw - 90, 10, 82, 28);
+    const int openBtnX = rx + rw - 94 - openBtnW;
+    openBtn.setBounds(openBtnX, 3, openBtnW, 21);
+    optionsBtn.setBounds(rx + rw - 90, 3, 82, 21);
 
     // Botón de favoritos: posición fija justo antes del botón Open.
-    const int favBtnW = 18;
+    const int favBtnW = 100;
     const int favBtnX = openBtnX - 10 - favBtnW;
-    addFavBtn.setBounds(favBtnX, 16, favBtnW, 18); // Botón bajado a Y=15 para centrado vertical perfecto
+    for (size_t i = 0; i < ratingButtons.size(); ++i)
+    {
+        bankRatingButtons[i].setBounds(favBtnX + (int) i * 20, 2, 20, 20);
+        ratingButtons[i].setBounds(favBtnX + (int) i * 20, 25, 20, 20);
+    }
+    categoryButton.setBounds(openBtnX, 27, openBtnW, 18);
 
     // Nombre del preset / estado: centrados entre el final del texto "DSK SFz player"
     // (izquierda) y el botón de favoritos (derecha) — referencia pedida por el usuario.
@@ -878,14 +1090,15 @@ void DSKSFzEditor::resized()
     const int titleTextEndX = hdrLabelX + (int)titleFontForWidth.getStringWidth("DSK SFz player");
     const int lcdX = titleTextEndX + 14;
     const int lcdW = juce::jmax(60, (favBtnX - 10) - lcdX);
-    instrNameLabel.setBounds(lcdX, 6, lcdW, 24);
-    statusLabel.setBounds(lcdX, 30, lcdW, 16);
+    bankNameLabel.setBounds(lcdX, 2, lcdW, 20);
+    instrNameLabel.setBounds(lcdX, 25, lcdW, 20);
+    statusLabel.setBounds(rx + rw - 90, 28, 82, 16);
 
     auto K = [&](juce::Slider& s, int col, int secY)
     { s.setBounds(colX(rx, col), secY + KNOB_Y, KSZ, KSZ); };
 
     K(masterVolKnob, 0, S0); K(masterPanKnob, 1, S0);
-    K(pitchTransKnob, 2, S0); K(pitchFineKnob, 3, S0);
+    K(pitchTransKnob, 2, S0); K(pitchFineKnob, 3, S0); K(glideKnob, 4, S0);
     K(ampAKnob, 5, S0); K(ampDKnob, 6, S0);
     K(ampSKnob, 7, S0); K(ampRKnob, 8, S0);
 
@@ -907,6 +1120,7 @@ void DSKSFzEditor::resized()
         kx += 4;
         KF(filtAKnob); KF(filtDKnob); KF(filtSKnob); KF(filtRKnob);
 
+        modWheelBox.setBounds(divX + 54, S1 + 1, 126, 16);
         const int modZoneW = rw - filterZoneW;
         const int lfoComboW = juce::jmin(72, (modZoneW / 2 - 8 - 2 * KSLOT));
         const int lfoComboH = 18;
@@ -923,69 +1137,96 @@ void DSKSFzEditor::resized()
         lfo2AmtKnob.setBounds(lfo2X + lfoComboW + 4 + KSLOT, S1 + KNOB_Y, KSZ, KSZ);
     }
 
-    const int fxSlot = (rw - 6) / 5;
     struct FXSlot { juce::TextButton* btn; std::vector<juce::Slider*> knobs; };
     FXSlot fxSlots[] = {
         { &driveOnBtn,  { &driveAmtKnob, &driveMixKnob } },
         { &chorusOnBtn, { &choRateKnob, &choDepthKnob, &choMixKnob } },
+        { &phaserOnBtn, { &phaRateKnob, &phaDepthKnob, &phaMixKnob } },
+        { &flangerOnBtn, { &flgRateKnob, &flgDepthKnob, &flgMixKnob } },
         { &delayOnBtn,  { &delTimeKnob, &delFbkKnob, &delMixKnob } },
         { &reverbOnBtn, { &revSizeKnob, &revDampKnob, &revMixKnob } },
         { &eqOnBtn,     { &eqLowKnob, &eqMidKnob, &eqHighKnob } },
     };
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 7; ++i)
     {
-        const int x0 = rx + 3 + i * fxSlot;
-        fxSlots[i].btn->setBounds(x0 + 2, S2 + 4, fxSlot - 4, 14);
+        const int fxSlot = (rw - 6) / (i < 4 ? 4 : 3);
+        const int rowY = S2 + (i < 4 ? 0 : ROW_H);
+        const int x0 = rx + 3 + (i < 4 ? i : i - 4) * fxSlot;
+        fxSlots[i].btn->setBounds(x0 + 2, rowY + 4, fxSlot - 4, 14);
         const int nk = (int)fxSlots[i].knobs.size();
         const int avail = fxSlot - 4;
         const int kw = juce::jmin(KSZ, (avail - (nk - 1) * 2) / nk);
         const int kx0 = x0 + 2 + (avail - nk * kw - (nk - 1) * 2) / 2;
         for (int j = 0; j < nk; ++j)
-            fxSlots[i].knobs[j]->setBounds(kx0 + j * (kw + 2), S2 + KNOB_Y + 2, kw, kw);
+            fxSlots[i].knobs[j]->setBounds(kx0 + j * (kw + 2), rowY + KNOB_Y + 2, kw, kw);
     }
 
     voicesKnob.setBounds(rx + 66, SF + 5, 130, 20);
     rrResetBtn.setBounds(rx + rw - 80, SF + 4, 74, 22);
     if (recorderBar != nullptr)
-        recorderBar->setBounds(rx + 210, SF + 4, (rx + rw - 90) - (rx + 210), 22);
+        recorderBar->setBounds(rx + 210, SF + 4, (rx + rw - 86) - (rx + 210), 22);
 
-    // Espacio libre bajo Voices/Grabador hasta el teclado — panel visualizador
-    const int vizY = SF + FTR_H + 2;
-    const int vizBottom = H - KB_H - VDIV_H;
-    visualizer.setBounds(rx, vizY, W - rx, juce::jmax(0, vizBottom - vizY));
+    // Only an explicit visual-size change alters its height. Window resizing
+    // moves the visual down with the keyboard without stretching it vertically.
+    const int available = juce::jmax(0, H - DEF_H);
+    const int actualHeight = juce::jmin(visualHeight, available);
+    visualizer.setBounds(rx + VDIV_H, H - KB_H - actualHeight, W - rx - VDIV_H, actualHeight);
+    visualizer.setVisible(actualHeight > 0);
 
     for (auto& kl : kLabels)
         kl.lbl->setBounds(kl.s->getX(), kl.s->getBottom() + 2, kl.s->getWidth(), 14);
+    const float controlsScale = juce::jmin(1.0f, (float) (W - rx - VDIV_H) / 780.0f);
+    const auto transform = juce::AffineTransform::scale(controlsScale)
+        .translated(rx * (1.0f - controlsScale) + VDIV_H, 0.0f);
+    for (auto* child : getChildren())
+        if (child != &libraryPanel && child != &keyboard && child != &visualizer
+            && dynamic_cast<juce::ResizableCornerComponent*>(child) == nullptr
+            && dynamic_cast<juce::ResizableBorderComponent*>(child) == nullptr)
+            child->setTransform(transform);
+    repaint();
 }
 
 // ── timerCallback ─────────────────────────────────────────────────────────────
 void DSKSFzEditor::timerCallback()
 {
-    auto sfz = proc.getCurrentSFZFile();
-    const bool sf2Mode = proc.isSF2Loaded();
-    const bool dsMode  = proc.isDSLoaded();
-    const bool hasPresetChoice = (sf2Mode && proc.getSF2Presets().size() > 1)
-                               || (dsMode  && proc.getDSPresetList().size() > 1);
+    // Parameter attachments can change toggle state without button callbacks
+    // when restoring a preset or receiving host automation.
+    for (auto* button : { &driveOnBtn, &chorusOnBtn, &phaserOnBtn, &flangerOnBtn, &delayOnBtn, &reverbOnBtn, &eqOnBtn })
+        button->setButtonText(button->getName() + (button->getToggleState() ? " ON" : " OFF"));
 
-    juce::String name = sfz.existsAsFile() ? sfz.getFileNameWithoutExtension() : "No instrument loaded";
-    if (sf2Mode)
+    const auto instrument = currentLibraryInstrument();
+    const auto info = libraryPanel.instrumentInfo(instrument);
+    for (size_t i = 0; i < ratingButtons.size(); ++i)
     {
-        const auto& presets = proc.getSF2Presets();
-        const int curIdx = proc.getSF2CurrentPresetIndex();
-        for (auto& p : presets)
-            if (p.index == curIdx) { name += "  -  " + p.name; break; }
+        ratingButtons[i].setEnabled(instrument.file != juce::File());
+        ratingButtons[i].setFilled((int) i < info.rating);
     }
-    else if (dsMode)
+    categoryButton.setEnabled(instrument.file != juce::File());
+    categoryButton.setButtonText(info.category.isEmpty() ? "Category..." : info.category);
+    if (proc.isLoadingInstrument.load()) return;
+    auto sfz = proc.getCurrentSFZFile();
+    libraryPanel.setLoadedInstrument(instrument);
+    const bool sf2Mode = proc.isSF2Loaded();
+
+    const bool hasBank = sf2Mode;
+    bankNameLabel.setVisible(hasBank);
+    bankNameLabel.setText("SoundFont: " + libraryPanel.soundFontName(sfz, sfz.getFileNameWithoutExtension()), juce::dontSendNotification);
+    const LibrarySearch::Result bank { {}, {}, sfz };
+    const int bankRating = hasBank ? libraryPanel.instrumentInfo(bank).rating : 0;
+    for (size_t i = 0; i < bankRatingButtons.size(); ++i)
     {
-        const auto& presets = proc.getDSPresetList();
-        const int curIdx = proc.getDSCurrentPresetIndex();
-        if (curIdx >= 0 && curIdx < (int)presets.size() && presets.size() > 1)
-            name += "  -  " + presets[(size_t)curIdx].getFileNameWithoutExtension();
+        bankRatingButtons[i].setVisible(hasBank);
+        bankRatingButtons[i].setFilled((int) i < bankRating);
     }
-    if (hasPresetChoice) name += "  [+]"; // [+] indica que el nombre es clicable (selector de preset)
+    const auto name = instrument.file != juce::File() ? instrument.name : "No instrument loaded";
     instrNameLabel.setText(name, juce::dontSendNotification);
-    instrNameLabel.setTooltip(hasPresetChoice ? "Click to choose preset" : "");
-    instrNameLabel.onClick = hasPresetChoice ? std::function<void()>([this]() { showPresetPicker(); }) : nullptr;
+    instrNameLabel.setTooltip(instrument.file != juce::File() ? "Click to rename instrument" : "");
+    instrNameLabel.onClick = instrument.file != juce::File() ? std::function<void()>([this]
+    {
+        const auto current = currentLibraryInstrument();
+        if (current.file != juce::File())
+            libraryPanel.renameSoundFont(current.file, current.name, current.bank, current.program);
+    }) : nullptr;
 
     statusLabel.setText(
         proc.isLoadingInstrument.load() ? "Loading..." : "Ready",
@@ -996,6 +1237,14 @@ void DSKSFzEditor::timerCallback()
         auto* p = proc.params.getRawParameterValue(id);
         return p ? p->load() : 0.0f;
     };
+    int spectrumStart1, spectrumSize1, spectrumStart2, spectrumSize2;
+    proc.spectrumFifo.prepareToRead(proc.spectrumFifo.getNumReady(), spectrumStart1, spectrumSize1, spectrumStart2, spectrumSize2);
+    for (int i = 0; i < spectrumSize1; ++i) visualizer.pushSpectrumSample(proc.spectrumSamples[(size_t) (spectrumStart1 + i)]);
+    for (int i = 0; i < spectrumSize2; ++i) visualizer.pushSpectrumSample(proc.spectrumSamples[(size_t) (spectrumStart2 + i)]);
+    proc.spectrumFifo.finishedRead(spectrumSize1 + spectrumSize2);
+    EQBandSettings eqBands { { gf("eqLowFreq"), gf("eqMidFreq"), gf("eqHighFreq") },
+        { gf("eqLowWidth"), gf("eqMidWidth"), gf("eqHighWidth") } };
+    visualizer.setEQResponse(proc.getSampleRate(), gf("eqLow"), gf("eqMid"), gf("eqHigh"), gf("eqOn") > 0.5f, eqBands);
     adsrDisplay.attack = gf("ampAttack");
     adsrDisplay.decay = gf("ampDecay");
     adsrDisplay.sustain = gf("ampSustain");
@@ -1029,6 +1278,7 @@ void DSKSFzEditor::timerCallback()
 // ── PC keyboard → MIDI note forwarding ───────────────────────────────────────
 bool DSKSFzEditor::keyPressed(const juce::KeyPress& key)
 {
+    if (libraryPanel.navigateInstruments(key)) return true;
     return keyboard.keyPressed(key);
 }
 
@@ -1038,23 +1288,66 @@ bool DSKSFzEditor::keyStateChanged(bool isKeyDown)
 }
 
 // ── Library callbacks ─────────────────────────────────────────────────────────
-void DSKSFzEditor::libraryFileRequested(const juce::File& sfzFile)
+LibrarySearch::Result DSKSFzEditor::currentLibraryInstrument() const
+{
+    if (proc.isLoadingInstrument.load()) return {};
+    auto file = proc.getCurrentSFZFile();
+    if (!file.existsAsFile()) return {};
+    if (proc.isSF2Loaded())
+    {
+        for (const auto& preset : proc.getSF2Presets())
+            if (preset.index == proc.getSF2CurrentPresetIndex())
+                return { libraryPanel.soundFontName(file, preset.name, preset.bank, preset.presetNumber), {}, file,
+                         preset.bank, preset.presetNumber };
+        return {};
+    }
+    if (proc.isDSLoaded())
+    {
+        const auto& files = proc.getDSPresetList();
+        const int selected = proc.getDSCurrentPresetIndex();
+        if (selected >= 0 && selected < (int) files.size()) file = files[(size_t) selected];
+    }
+    return { libraryPanel.soundFontName(file, file.getFileNameWithoutExtension()), {}, file };
+}
+
+void DSKSFzEditor::libraryFileRequested(const juce::File& file)
+{
+    loadLibraryInstrument(file);
+}
+
+void DSKSFzEditor::loadLibraryInstrument(const juce::File& file, int bank, int program)
 {
     statusLabel.setText("Loading...", juce::dontSendNotification);
     const int currentGen = ++loadGeneration;
-    juce::Thread::launch([this, sfzFile, currentGen]()
+    const juce::Component::SafePointer<DSKSFzEditor> safeThis(this);
+    libraryLoadPool.addJob([this, safeThis, file, bank, program, currentGen]()
+    {
+        if (currentGen != loadGeneration.load()) return;
+        // Stepping through search hits in the same SoundFont only changes the
+        // preset; keep the bank's sample data loaded.
+        bool loaded = bank >= 0 && !proc.isLoadingInstrument.load() && proc.isSF2Loaded()
+            && proc.getCurrentSFZFile() == file;
+        if (!loaded) loaded = proc.loadInstrument(file);
+        if (currentGen != loadGeneration.load()) return;
+        if (loaded && bank >= 0)
         {
-            if (currentGen != loadGeneration.load()) return; // Abortar carga si hay un clic más reciente
-    proc.loadInstrument(sfzFile);
-    juce::MessageManager::callAsync([this, currentGen]()
+            loaded = false;
+            for (const auto& preset : proc.getSF2Presets())
+                if (preset.bank == bank && preset.presetNumber == program)
+                {
+                    loaded = proc.selectSF2Preset(preset.index);
+                    break;
+                }
+        }
+        juce::MessageManager::callAsync([safeThis, currentGen, loaded]()
         {
-            if (currentGen == loadGeneration.load())
+            if (safeThis && currentGen == safeThis->loadGeneration.load())
             {
-                statusLabel.setText("Ready", juce::dontSendNotification);
-                onInstrumentLoaded();
+                safeThis->onInstrumentLoaded();
+                safeThis->statusLabel.setText(loaded ? "Ready" : "Could not load instrument", juce::dontSendNotification);
             }
         });
-        });
+    });
 }
 
 void DSKSFzEditor::libraryZipRequested(const juce::File& zipFile)
@@ -1068,7 +1361,7 @@ bool DSKSFzEditor::isInterestedInFileDrag(const juce::StringArray& files)
     for (auto& f : files)
     {
         juce::File file(f);
-        if (file.hasFileExtension("sfz;sf2;dspreset;dslibrary") || file.hasFileExtension(".zip") || file.isDirectory())
+        if (file.hasFileExtension("sfz;sf2;dspreset;dslibrary;gif") || file.hasFileExtension(".zip") || file.isDirectory())
             return true;
     }
     return false;
@@ -1093,6 +1386,7 @@ void DSKSFzEditor::filesDropped(const juce::StringArray& files, int, int)
 
     bool sfzLoaded = false;
     bool zipLoaded = false;
+    bool gifLoaded = false;
 
     for (auto& f : files)
     {
@@ -1100,6 +1394,11 @@ void DSKSFzEditor::filesDropped(const juce::StringArray& files, int, int)
         if (file.isDirectory())
         {
             libraryPanel.addFolderDirect(file);
+        }
+        else if (!gifLoaded && file.hasFileExtension("gif"))
+        {
+            visualizer.loadGif(file);
+            gifLoaded = true;
         }
         else if (!sfzLoaded && file.hasFileExtension("sfz;sf2;dspreset;dslibrary"))
         {
@@ -1114,11 +1413,11 @@ void DSKSFzEditor::filesDropped(const juce::StringArray& files, int, int)
     }
 }
 
-// ── Divider drag (adjustable library width and window height) ─────────────────
+// ── Divider drag (browser width and independent visual height) ─────────────────
 void DSKSFzEditor::mouseMove(const juce::MouseEvent& e)
 {
     bool nearV = isNearDivider(e.x) && e.y < getHeight() - KB_H - VDIV_H;
-    bool nearH = isNearHDivider(e.y);
+    bool nearH = e.x >= libWidth + VDIV_H && isNearHDivider(e.y);
 
     if (nearV)       setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
     else if (nearH)  setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
@@ -1128,17 +1427,20 @@ void DSKSFzEditor::mouseMove(const juce::MouseEvent& e)
 void DSKSFzEditor::mouseDown(const juce::MouseEvent& e)
 {
     bool nearV = isNearDivider(e.x) && e.y < getHeight() - KB_H - VDIV_H;
-    bool nearH = isNearHDivider(e.y);
+    bool nearH = e.x >= libWidth + VDIV_H && isNearHDivider(e.y);
 
     if (!nearV && !nearH) return;
 
     if (e.getNumberOfClicks() >= 2)
     {
         if (nearV) libWidth = LIB_W;
-        if (nearH) pluginHeight = DEF_STARTUP_H;
+        if (nearH)
+        {
+            toggleCompactVoicesArea();
+            return;
+        }
 
-        setSize(libWidth + 780, pluginHeight);
-        applyWindowConstraints();
+        resized();
         return;
     }
 
@@ -1152,22 +1454,11 @@ void DSKSFzEditor::mouseDown(const juce::MouseEvent& e)
     if (nearH)
     {
         isDraggingHDivider = true;
-        pluginHeightAtDragStart = pluginHeight;
+        visualHeightAtDragStart = visualHeight;
         dragStartY = e.y;
     }
 
-    if (auto* c = getConstrainer())
-    {
-        if (proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
-        {
-            // Permite a la ventana crecer libremente para que nuestro paint() tape el fondo
-            c->setSizeLimits(120 + 780, DEF_H, 4000, 4000);
-        }
-        else
-        {
-            c->setSizeLimits(120 + 780, DEF_H, 450 + 780, 1200);
-        }
-    }
+
 }
 
 void DSKSFzEditor::mouseDrag(const juce::MouseEvent& e)
@@ -1175,23 +1466,10 @@ void DSKSFzEditor::mouseDrag(const juce::MouseEvent& e)
     if (!isDraggingDivider && !isDraggingHDivider) return;
 
     if (isDraggingDivider)
-        libWidth = juce::jlimit(120, 450, libWidthAtDragStart + (e.x - dragStartX));
-
+        libWidth = juce::jlimit(120, juce::jmax(120, juce::jmin(600, getWidth() - 590)), libWidthAtDragStart + (e.x - dragStartX));
     if (isDraggingHDivider)
-        pluginHeight = juce::jlimit(DEF_H, 4000, pluginHeightAtDragStart + (e.y - dragStartY));
-
-    // Si es Standalone, actualizamos el limitador al vuelo con tu nuevo ancho manual
-    // justo antes de aplicar el cambio de tamaño, evitando que se quede trabado
-    if (auto* c = getConstrainer())
-    {
-        if (proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
-        {
-            int nextW = libWidth + 780;
-            c->setSizeLimits(nextW, DEF_H, nextW, 4000);
-        }
-    }
-
-    setSize(libWidth + 780, pluginHeight);
+        visualHeight = juce::jlimit(0, juce::jmax(0, getHeight() - DEF_H), visualHeightAtDragStart - (e.y - dragStartY));
+    resized();
 }
 
 void DSKSFzEditor::mouseUp(const juce::MouseEvent&)
@@ -1199,16 +1477,73 @@ void DSKSFzEditor::mouseUp(const juce::MouseEvent&)
     if (!isDraggingDivider && !isDraggingHDivider) return;
     isDraggingDivider = false;
     isDraggingHDivider = false;
-    applyWindowConstraints();
+    if (auto* s = proc.getAppProperties().getUserSettings())
+    { s->setValue("libWidth", libWidth); s->setValue("visualHeight", visualHeight); s->saveIfNeeded(); }
+}
+
+void DSKSFzEditor::setVoicesVisualHeight(int height)
+{
+    if (visualHeight > 0) expandedVisualHeight = visualHeight;
+    visualHeight = juce::jlimit(0, 1200, height);
+    // Make room if needed, but shrinking a visual never resizes the window.
+    if (visualHeight > getHeight() - DEF_H)
+    {
+        if (auto* c = getConstrainer()) c->setSizeLimits(710, DEF_H, 4000, 4000);
+        setSize(getWidth(), DEF_H + visualHeight);
+        applyWindowConstraints();
+    }
+    else resized();
+    if (auto* settings = proc.getAppProperties().getUserSettings())
+    {
+        settings->setValue("visualHeight", visualHeight);
+        settings->setValue("expandedVisualHeight", expandedVisualHeight);
+        settings->setValue("pluginHeight", getHeight());
+        settings->saveIfNeeded();
+    }
+}
+
+void DSKSFzEditor::toggleCompactVoicesArea()
+{
+    setVoicesVisualHeight(visualHeight > 0 ? 0 : expandedVisualHeight);
 }
 
 // ── Window constraints ────────────────────────────────────────────────────────
+float DSKSFzEditor::maximumGuiScale() const
+{
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect(getScreenBounds());
+    if (display == nullptr) display = displays.getPrimaryDisplay();
+    if (display == nullptr || getWidth() <= 0 || getHeight() <= 0) return 2.0f;
+    const auto area = display->userArea.reduced(24);
+    return juce::jlimit(0.5f, 2.0f, juce::jmin(
+        (float) area.getWidth() / ((float) getWidth() * hostScale),
+        (float) (area.getHeight() - 32) / ((float) getHeight() * hostScale)));
+}
+
+void DSKSFzEditor::setGuiScale(float scale)
+{
+    guiScale = juce::jlimit(0.5f, maximumGuiScale(), scale);
+    // Keep the user's zoom separate from the DAW's display scaling.
+    juce::AudioProcessorEditor::setScaleFactor(hostScale * guiScale);
+    if (auto* settings = proc.getAppProperties().getUserSettings())
+    {
+        settings->setValue("guiScale", guiScale);
+        settings->saveIfNeeded();
+    }
+}
+
+void DSKSFzEditor::setScaleFactor(float newScale)
+{
+    hostScale = newScale > 0.0f ? newScale : 1.0f;
+    juce::AudioProcessorEditor::setScaleFactor(hostScale * guiScale);
+}
+
 void DSKSFzEditor::applyWindowConstraints()
 {
     if (auto* c = getConstrainer())
     {
         if (proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
-            c->setSizeLimits(120 + 780, DEF_H, 4000, 4000);
+            c->setSizeLimits(710, DEF_H, 4000, 4000);
         else
             c->setSizeLimits(getWidth(), getHeight(), getWidth(), getHeight());
     }
@@ -1243,34 +1578,7 @@ void DSKSFzEditor::loadInstrumentForPreview(const juce::File& f)
 
 void DSKSFzEditor::onInstrumentLoaded()
 {
-    if (proc.isSF2Loaded() && proc.getSF2Presets().size() > 1)
-        showPresetPicker();
-    else if (proc.isDSLoaded() && proc.getDSPresetList().size() > 1)
-        showPresetPicker();
-}
-
-void DSKSFzEditor::showPresetPicker()
-{
-    if (proc.isSF2Loaded())
-    {
-        auto& presets = proc.getSF2Presets();
-        if (presets.empty()) return;
-
-        auto picker = std::make_unique<SF2PresetPicker>(presets, proc.getSF2CurrentPresetIndex());
-        picker->onPresetChosen = [this](int presetIndex) { proc.selectSF2Preset(presetIndex); };
-
-        juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
-    }
-    else if (proc.isDSLoaded())
-    {
-        auto& presets = proc.getDSPresetList();
-        if (presets.empty()) return;
-
-        auto picker = std::make_unique<DSPresetPicker>(presets, proc.getDSCurrentPresetIndex());
-        picker->onPresetChosen = [this](int presetIndex) { proc.selectDSPreset(presetIndex); };
-
-        juce::CallOutBox::launchAsynchronously(std::move(picker), instrNameLabel.getScreenBounds(), this);
-    }
+    timerCallback();
 }
 
 // ── Instrument text editor (Options > Edit Instrument...) ───────────────────

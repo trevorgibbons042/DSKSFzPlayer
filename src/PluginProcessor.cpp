@@ -3,6 +3,38 @@
 #include "PluginEditor.h"
 #include "DecentSampler/DecentSamplerParser.h"
 
+juce::String DSKSFzProcessor::getPresetMemoryKey(const juce::File& file) const
+{
+    auto path = file.getFullPathName();
+
+   #if JUCE_WINDOWS
+    path = path.toLowerCase();
+   #endif
+
+    return "lastPreset_"
+        + juce::String::toHexString(path.hashCode64());
+}
+
+int DSKSFzProcessor::getRememberedPreset(const juce::File& file)
+{
+    if (auto* settings = appProperties.getUserSettings())
+        return settings->getIntValue(getPresetMemoryKey(file), 0);
+
+    return 0;
+}
+
+void DSKSFzProcessor::rememberPreset(const juce::File& file, int index)
+{
+    if (!file.existsAsFile())
+        return;
+
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        settings->setValue(getPresetMemoryKey(file), index);
+        settings->saveIfNeeded();
+    }
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout DSKSFzProcessor::createParameters()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
@@ -85,6 +117,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout DSKSFzProcessor::createParam
 
     params.push_back(makeInt  ("maxVoices", "Polyphony", 1, 64, 32));
 
+
+    // Append new parameters to preserve existing host parameter ordering.
+    params.push_back(makeBool("phaserOn", "Phaser Enable", false));
+    params.push_back(makeFloat("phaserRate", "Phaser Rate", 0.1f, 10.0f, 0.5f));
+    params.push_back(makeFloat("phaserDepth", "Phaser Depth", 0.0f, 1.0f, 0.7f));
+    params.push_back(makeFloat("phaserMix", "Phaser Mix", 0.0f, 1.0f, 0.5f));
+    params.push_back(makeBool("flangerOn", "Flanger Enable", false));
+    params.push_back(makeFloat("flangerRate", "Flanger Rate", 0.1f, 10.0f, 0.25f));
+    params.push_back(makeFloat("flangerDepth", "Flanger Depth", 0.0f, 1.0f, 0.7f));
+    params.push_back(makeFloat("flangerMix", "Flanger Mix", 0.0f, 1.0f, 0.5f));
+
+    params.push_back(makeFloat("glideTime", "Glide (ms)", 0.0f, 2000.0f, 0.0f));
+    params.push_back(makeInt("modWheelTarget", "Mod Wheel Depth", 0, 3, 0));
+    for (const auto& band : { juce::String("Low"), juce::String("Mid"), juce::String("High") })
+    {
+        const float frequency = band == "Low" ? 200.0f : band == "Mid" ? 1000.0f : 4000.0f;
+        params.push_back(makeFloat("eq" + band + "Freq", "EQ " + band + " Frequency", 20.0f, 20000.0f, frequency));
+        params.push_back(makeFloat("eq" + band + "Width", "EQ " + band + " Width", 0.25f, 4.0f, 1.0f));
+    }
     return { params.begin(), params.end() };
 }
 
@@ -142,6 +193,18 @@ void DSKSFzProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         synth.processBlock(buffer, midiMessages);
     fx.process(buffer);
 
+    if (buffer.getNumChannels() > 0)
+    {
+        int start1, size1, start2, size2;
+        spectrumFifo.prepareToWrite(buffer.getNumSamples(), start1, size1, start2, size2);
+        for (int i = 0; i < size1 + size2; ++i)
+        {
+            float sample = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch) sample += buffer.getSample(ch, i);
+            spectrumSamples[(size_t) (i < size1 ? start1 + i : start2 + i - size1)] = sample / buffer.getNumChannels();
+        }
+        spectrumFifo.finishedWrite(size1 + size2);
+    }
     recorder.processBlock(buffer);
 }
 
@@ -159,10 +222,17 @@ void DSKSFzProcessor::resetRoundRobin()
 
 bool DSKSFzProcessor::selectSF2Preset(int presetIndex)
 {
+    std::lock_guard<std::mutex> lock(loadMutex);
     isLoadingInstrument.store(true, std::memory_order_release);
     juce::Thread::sleep(30);
+
     sf2synth.allNotesOff();
-    bool ok = sf2synth.selectPreset(presetIndex);
+
+    const bool ok = sf2synth.selectPreset(presetIndex);
+
+    if (ok)
+        rememberPreset(currentSFZFile, presetIndex);
+
     isLoadingInstrument.store(false, std::memory_order_release);
     return ok;
 }
@@ -202,6 +272,8 @@ void DSKSFzProcessor::syncParametersToEngine()
     synth.globalTranspose = getF("transpose");
     synth.globalTune      = getF("fineTune");
     synth.maxVoices       = getI("maxVoices");
+    synth.glideTime = sf2synth.glideTime = getF("glideTime");
+    synth.modWheel.target = sf2synth.modWheel.target = getI("modWheelTarget");
 
     // El motor SF2 comparte los mismos parámetros globales que SFZSynth (ver
     // SF2Synth.h): vol/pan/transpose/tune/polifonía, ADSR de amplitud, filtro
@@ -255,6 +327,16 @@ void DSKSFzProcessor::syncParametersToEngine()
     fx.chorusDepth  = getF("chorusDepth");
     fx.chorusMix    = getF("chorusMix");
 
+    fx.phaserBypass = !getB("phaserOn");
+    fx.phaserRate = getF("phaserRate");
+    fx.phaserDepth = getF("phaserDepth");
+    fx.phaserMix = getF("phaserMix");
+
+    fx.flangerBypass = !getB("flangerOn");
+    fx.flangerRate = getF("flangerRate");
+    fx.flangerDepth = getF("flangerDepth");
+    fx.flangerMix = getF("flangerMix");
+
     fx.delayBypass   = !getB("delayOn");
     fx.delayTimeMs   = getF("delayTime");
     fx.delayFeedback = getF("delayFeedback");
@@ -266,6 +348,11 @@ void DSKSFzProcessor::syncParametersToEngine()
     fx.reverbMix     = getF("reverbMix");
 
     fx.eqBypass   = !getB("eqOn");
+    EQBandSettings bands { { getF("eqLowFreq"), getF("eqMidFreq"), getF("eqHighFreq") },
+        { getF("eqLowWidth"), getF("eqMidWidth"), getF("eqHighWidth") } };
+    bands.constrain(getSampleRate());
+    fx.eqLowFreq = bands.frequencies[0]; fx.eqMidFreq = bands.frequencies[1]; fx.eqHighFreq = bands.frequencies[2];
+    fx.eqWidths = bands.widths;
     fx.eqLowGain  = getF("eqLow");
     fx.eqMidGain  = getF("eqMid");
     fx.eqHighGain = getF("eqHigh");
@@ -305,7 +392,37 @@ bool DSKSFzProcessor::loadInstrument(const juce::File& file)
         ok = synth.loadSFZ(file);
         if (ok) currentFormat = InstrumentFormat::SFZ;
     }
-    if (ok) currentSFZFile = file;
+    if (ok)
+    {
+        currentSFZFile = file;
+
+        const int remembered = getRememberedPreset(file);
+
+        if (currentFormat == InstrumentFormat::SF2)
+        {
+            const int count = (int) sf2synth.getPresets().size();
+
+            if (count > 0)
+            {
+                const int index = juce::jlimit(0, count - 1, remembered);
+                sf2synth.selectPreset(index);
+            }
+        }
+        else if (currentFormat == InstrumentFormat::DecentSampler
+                 && dsPresetList.size() > 1)
+        {
+            const int index = juce::jlimit(
+                0,
+                (int) dsPresetList.size() - 1,
+                remembered);
+
+            if (index != dsCurrentPresetIndex
+                && loadDecentSamplerPreset(dsPresetList[(size_t) index]))
+            {
+                dsCurrentPresetIndex = index;
+            }
+        }
+    }
 
     isLoadingInstrument.store(false, std::memory_order_release);
     return ok;
@@ -366,20 +483,26 @@ bool DSKSFzProcessor::loadDSLibrary(const juce::File& dslibraryFile)
 
 bool DSKSFzProcessor::selectDSPreset(int presetIndex)
 {
-    if (presetIndex < 0 || presetIndex >= (int)dsPresetList.size())
+    std::lock_guard<std::mutex> lock(loadMutex);
+    if (presetIndex < 0 || presetIndex >= (int) dsPresetList.size())
         return false;
 
     isLoadingInstrument.store(true, std::memory_order_release);
     juce::Thread::sleep(30);
     allNotesOff();
 
-    const bool ok = loadDecentSamplerPreset(dsPresetList[(size_t)presetIndex]);
-    if (ok) dsCurrentPresetIndex = presetIndex;
+    const bool ok =
+        loadDecentSamplerPreset(dsPresetList[(size_t) presetIndex]);
+
+    if (ok)
+    {
+        dsCurrentPresetIndex = presetIndex;
+        rememberPreset(currentSFZFile, presetIndex);
+    }
 
     isLoadingInstrument.store(false, std::memory_order_release);
     return ok;
 }
-
 void DSKSFzProcessor::getStateInformation(juce::MemoryBlock& dest)
 {
     auto state = params.copyState();

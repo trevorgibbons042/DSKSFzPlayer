@@ -36,6 +36,8 @@ public:
     void getStateInformation(juce::MemoryBlock& dest) override;
     void setStateInformation(const void* data, int size) override;
 
+    juce::AbstractFifo spectrumFifo { 8192 };
+    std::array<float, 8192> spectrumSamples {};
     juce::AudioProcessorValueTreeState params;
 
     // Piano keyboard state — driven by UI keyboard + incoming MIDI
@@ -92,6 +94,10 @@ private:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
     void syncParametersToEngine();
+
+    juce::String getPresetMemoryKey(const juce::File& file) const;
+    int getRememberedPreset(const juce::File& file);
+    void rememberPreset(const juce::File& file, int index);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DSKSFzProcessor)
 };

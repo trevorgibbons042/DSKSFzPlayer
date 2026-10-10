@@ -10,7 +10,7 @@ Version 1.0 · DSK Music · www.dskmusic.com
 
 DSK SFz Player is a 64-voice polyphonic SFZ/SF2/Decent Sampler sampler available as a VST3 plugin
 and as a standalone application. Load any SFZ, SF2 (SoundFont2) or Decent Sampler (.dspreset /
-.dslibrary) instrument and play it with full MIDI control, five effects, and real-time parameter
+.dslibrary) instrument and play it with full MIDI control, seven effects, and real-time parameter
 automation.
 
 Supported audio formats inside SFZ/Decent Sampler libraries: WAV, FLAC, OGG. SF2 (SoundFont2)
@@ -32,7 +32,7 @@ its own fixed UI and effects chain regardless of format (same approach as with S
 | What you drop                        | Result                                                          |
 |---------------------------------------|-----------------------------------------------------------------|
 | .sfz, .sf2 or .dspreset file          | Instrument loads immediately                                    |
-| .dslibrary pack                       | Extracted internally and loaded (no destination prompt); if it contains several presets, a picker appears |
+| .dslibrary pack                       | Extracted internally and loaded (no destination prompt); its presets are available in Instruments |
 | Folder with SFZ/SF2/Decent Sampler    | Folder is added to the Library panel                           |
 | .zip pack                             | You choose a destination, it extracts, then shows in Library   |
 
@@ -44,69 +44,35 @@ all dragged folders are added.
 Click **Open SFZ/SF2/DS/ZIP** (top-right of the main panel) to browse for .sfz, .sf2,
 .dspreset, .dslibrary, or .zip files. "DS" stands for Decent Sampler.
 
-### C  Library Tree
+### C  Instruments
 
-Double-click any .sfz, .sf2, .dspreset or .dslibrary entry in the Library tree on the left.
-
-If the SF2 file contains more than one bank/preset, or the .dslibrary pack contains more than one
-.dspreset, a picker menu appears automatically after loading — the same picker can be reopened at
-any time by clicking the instrument name shown in the header (a small **[+]** appears next to the
-name when a picker is available).
+Click an instrument in the Instruments tree on the left to load it. SoundFont presets appear
+under their SoundFont name. Up/Down loads the previous/next instrument in open groups;
+closed groups are skipped. Clicking the loaded name in the header opens Rename.
 
 ---
 
-## Library Panel  (left column)
+## Instruments Panel (left column)
 
-The Library organises your SFZ/SF2/Decent Sampler collections in a folder tree.
+Click **+** to add a library folder. **−** lets you choose a folder to remove from the
+library; the files stay on disk. **R** rescans the folders. **Collapse all** closes all groups.
+**F+** creates a SoundFont folder. Right-click a SoundFont heading and choose
+**Move SoundFont to folder** to organize it. Right-click a folder to rename or remove it.
+The SoundFont files stay in their original locations; folders are included in config exports.
 
-### Adding a folder
-Click **+** at the top of the panel and select a directory.
-All .sfz, .sf2, .dspreset, .dslibrary, and .zip files found inside (including subfolders) appear
-in the tree.
+Search filters this same tree across your SoundFonts and other instrument files. Matching
+presets stay under their SoundFont name, with no file paths. **X** clears the search.
+Category and minimum-rating filters can be combined with search.
 
-### Removing a folder
-Select a root folder in the tree and click **−**.
+## Ratings, Categories and Names
 
-### Expand / Collapse all
-Click **+/−** to toggle all library root folders open or closed.
-
-### Search
-Type in the search box to filter instruments by name or path across all library folders.
-Press **X** to clear the search and return to the tree view.
-
-### Right-click on an SFZ, SF2, .dspreset or .dslibrary file
-Opens a context menu with **Add to Favorites** (see Favorites section below).
-
----
-
-## Favorites
-
-The **★ FAVORITES** section always appears at the top of the Library tree.
-It lets you pin the instruments you use most often.
-
-### Adding an instrument to Favorites
-
-Right-click any .sfz, .sf2, .dspreset or .dslibrary file in the library tree → **Add to
-Favorites**, then choose:
-
-- **★ Favorites (no folder)** — pinned at the root level, no subfolder required
-- An existing Favorites folder name — adds it there
-- **New folder…** — creates a new named folder and adds the instrument to it
-
-### Loading a favorite
-Double-click any favorite entry.
-
-### Right-click a favorite entry
-- **Load** — loads the instrument
-- **Move to…** — moves it to a different folder (or to root)
-- **Remove from favorites** — removes it (asks for confirmation)
-
-### Right-click a Favorites folder
-- **Rename…** — rename the folder
-- **Delete folder** — deletes the folder and all entries inside (asks for confirmation)
-
-### Right-click the ★ FAVORITES header
-- **New folder…** — create a new Favorites subfolder
+Click one of the five stars next to the loaded name to rate an instrument from 1–5.
+Click the current rating again to clear it. **Category** opens category choices only,
+including a custom category option. Click the top instrument name to rename it.
+Right-click an instrument for rating, category and rename options; right-click a
+SoundFont heading to rename the bank. Leave a custom name blank to restore its original.
+Names, ratings and categories save in player settings and configuration exports;
+the source instrument files stay unchanged.
 
 ---
 
@@ -151,12 +117,16 @@ Two independent LFOs (LFO 1 and LFO 2).
 
 ### FX Section
 
-Five independent effect slots, each enabled with its labelled toggle button.
+Seven effect slots in two rows, each enabled with its labelled ON/OFF button. Adjusting a chorus, phaser, flanger, delay, or reverb knob also enables that effect.
+
+Signal order: Drive → Chorus → Phaser → Flanger → Delay → Reverb → EQ.
 
 | Effect | Parameters           | Description                          |
 |--------|----------------------|--------------------------------------|
 | DRIVE  | Drive · Mix          | Soft saturation / overdrive          |
 | CHORUS | Rate · Depth · Mix   | Chorus modulation effect             |
+| PHASER | Rate · Depth · Mix   | Six-stage sweeping phase effect      |
+| FLANGER | Rate · Depth · Mix  | Short modulated delay with feedback  |
 | DELAY  | Time · Fbk · Mix     | Stereo echo (1 ms – 2000 ms)        |
 | REVERB | Size · Damp · Mix    | Algorithmic reverb                   |
 | EQ     | Low · Mid · High     | Three-band EQ (±12 dB per band)     |
@@ -168,7 +138,22 @@ Five independent effect slots, each enabled with its labelled toggle button.
 | Voices   | Maximum simultaneous voices: 1 – 64             |
 | RR Reset | Reset round-robin counters to the first sample  |
 
+### EQ Graph
+
+The graph shows the combined response of Low (200 Hz shelf),
+Mid (1 kHz peak) and High (4 kHz shelf). It follows knob changes and host automation.
+Choose **EQ response** from **Visuals** in the bottom panel above the keys. With EQ off, the graph shows a flat bypass response.
+
 ### Visualizer
+
+Use **Visual** beside Voices to choose Tiny, Small, Medium, Large, or Hide. Drag the divider
+above the visual panel for a custom height; double-click it to hide/restore the visualizer.
+
+
+**Visuals → Add GIF...** loads an animated GIF. You can also drag a GIF onto the player. **My GIFs** lets you choose between your
+added GIFs. Choices are remembered; keep the GIF files available in their original locations.
+The visual height stays fixed while the window is resized. Drag the left divider to change
+the browser split; it does not change the window dimensions.
 
 The panel below the footer (above the keyboard) shows a decorative animation that reacts to the
 sound the plugin produces — it idles gently when nothing plays and comes alive with the audio
@@ -259,7 +244,6 @@ The existing library and favorites are completely replaced by the imported data.
 - **Hover tooltips:** Hover any knob or button to see its name and range.
 - **Right-click knobs:** Shows a popup to type an exact value or reset to default.
 - **Resizable window:** Drag the bottom-right corner to resize (min 860 × 360).
-- **The banner (bottom of Library):** Clicking it opens www.dskmusic.com.
 
 ---
 ---
@@ -293,7 +277,7 @@ interfaz y cadena de efectos fija, independientemente del formato (mismo criteri
 | Qué arrastras                        | Resultado                                                              |
 |----------------------------------------|--------------------------------------------------------------------------|
 | Archivo .sfz, .sf2 o .dspreset        | El instrumento se carga inmediatamente                                 |
-| Pack .dslibrary                       | Se extrae internamente y se carga (sin preguntar destino); si trae varios presets aparece un selector |
+| Pack .dslibrary                       | Se extrae internamente y se carga (sin preguntar destino); sus presets aparecen en Instruments |
 | Carpeta con SFZ/SF2/Decent Sampler    | La carpeta se añade al panel de Librería                              |
 | Pack .zip                             | Eliges dónde extraer, se descomprime y aparece en la Librería         |
 
@@ -305,70 +289,32 @@ soltar; todas las carpetas arrastradas se añaden.
 Haz clic en **Open SFZ/SF2/DS/ZIP** (arriba a la derecha) para buscar archivos .sfz,
 .sf2, .dspreset, .dslibrary o .zip. "DS" significa Decent Sampler.
 
-### C  Árbol de Librería
+### C  Instruments
 
-Haz doble clic en cualquier entrada .sfz, .sf2, .dspreset o .dslibrary del árbol de la Librería
-(columna izquierda).
-
-Si el archivo SF2 contiene más de un banco/preset, o el pack .dslibrary contiene más de un
-.dspreset, aparece automáticamente un menú selector tras la carga — el mismo selector puede
-volver a abrirse en cualquier momento haciendo clic en el nombre del instrumento mostrado en el
-encabezado (aparece un pequeño **[+]** junto al nombre cuando el selector está disponible).
+Haz clic en un instrumento del árbol Instruments para cargarlo. Los presets SF2 aparecen
+bajo el nombre de su SoundFont. Arriba/Abajo carga el instrumento anterior/siguiente de los
+grupos abiertos; omite los grupos cerrados. Haz clic en el nombre superior para renombrarlo.
 
 ---
 
-## Panel de Librería  (columna izquierda)
+## Panel Instruments (columna izquierda)
 
-La Librería organiza tus colecciones SFZ/SF2/Decent Sampler en un árbol de carpetas.
+**+** añade una carpeta. **−** permite elegir una carpeta para quitarla de la biblioteca;
+los archivos permanecen en disco. **R** actualiza la lista. **Collapse all** cierra los grupos.
+**F+** crea una carpeta SoundFont. Haz clic derecho en la cabecera de un SoundFont y
+elige **Move SoundFont to folder**. El clic derecho en una carpeta permite renombrarla
+o quitarla; no modifica la ubicación de los archivos. Las carpetas se incluyen en la exportación.
+La búsqueda filtra el mismo árbol y conserva los presets bajo su SoundFont, sin rutas de
+archivo. **X** borra la búsqueda. Puedes combinarla con filtros de categoría y valoración.
 
-### Añadir una carpeta
-Haz clic en **+** en la parte superior del panel y selecciona un directorio.
-Todos los archivos .sfz, .sf2, .dspreset, .dslibrary y .zip que contenga (incluyendo subcarpetas)
-aparecerán en el árbol.
+## Estrellas, categorías y nombres
 
-### Eliminar una carpeta
-Selecciona una carpeta raíz en el árbol y haz clic en **−**.
-
-### Expandir / Contraer todo
-Haz clic en **+/−** para abrir o cerrar todas las carpetas raíz de la librería.
-
-### Búsqueda
-Escribe en el cuadro de búsqueda para filtrar instrumentos por nombre o ruta.
-Pulsa **X** para limpiar la búsqueda y volver a la vista de árbol.
-
-### Clic derecho en un archivo SFZ, SF2, .dspreset o .dslibrary
-Abre un menú contextual con **Add to Favorites** (ver sección de Favoritos).
-
----
-
-## Favoritos
-
-La sección **★ FAVORITES** aparece siempre en la parte superior del árbol de la Librería.
-Permite fijar los instrumentos que más uses.
-
-### Añadir un instrumento a Favoritos
-
-Haz clic derecho en cualquier archivo .sfz, .sf2, .dspreset o .dslibrary → **Add to Favorites**,
-luego elige:
-
-- **★ Favorites (no folder)** — se fija en el nivel raíz, sin necesidad de subcarpeta
-- El nombre de una carpeta de Favoritos existente — se añade allí
-- **New folder…** — crea una nueva carpeta con nombre y añade el instrumento
-
-### Cargar un favorito
-Haz doble clic en cualquier entrada de favoritos.
-
-### Clic derecho en una entrada de favoritos
-- **Load** — carga el instrumento
-- **Move to…** — muévelo a otra carpeta (o a la raíz)
-- **Remove from favorites** — lo elimina (pide confirmación)
-
-### Clic derecho en una carpeta de Favoritos
-- **Rename…** — cambia el nombre de la carpeta
-- **Delete folder** — elimina la carpeta y todas sus entradas (pide confirmación)
-
-### Clic derecho en la cabecera ★ FAVORITES
-- **New folder…** — crea una nueva subcarpeta de Favoritos
+Haz clic en una de las cinco estrellas para valorar el instrumento de 1 a 5. Haz clic en
+la valoración actual para borrarla. **Category** muestra solamente categorías, incluida
+una opción personalizada. Haz clic en el nombre superior para renombrar el instrumento.
+El clic derecho ofrece valoración, categoría y nombre; en una cabecera SoundFont permite
+renombrar el banco. Un nombre vacío restaura el original. Estos datos se guardan en los
+ajustes y se incluyen en la exportación de configuración; no modifican el archivo original.
 
 ---
 
@@ -419,6 +365,8 @@ Cinco ranuras de efectos independientes, cada una activada con su botón.
 |--------|----------------------|-----------------------------------------|
 | DRIVE  | Drive · Mix          | Saturación suave / overdrive            |
 | CHORUS | Rate · Depth · Mix   | Efecto de chorus con modulación         |
+| PHASER | Rate · Depth · Mix   | Six-stage sweeping phase effect      |
+| FLANGER | Rate · Depth · Mix  | Short modulated delay with feedback  |
 | DELAY  | Time · Fbk · Mix     | Eco estéreo (1 ms – 2000 ms)           |
 | REVERB | Size · Damp · Mix    | Reverberación algorítmica               |
 | EQ     | Low · Mid · High     | Ecualizador de tres bandas (±12 dB)    |
@@ -430,7 +378,21 @@ Cinco ranuras de efectos independientes, cada una activada con su botón.
 | Voices   | Número máximo de voces simultáneas: 1 – 64                  |
 | RR Reset | Reinicia los contadores de round-robin a la primera muestra  |
 
+### Gráfica EQ
+
+Elige **EQ response** en **Visuals**, encima del teclado. La gráfica muestra la respuesta conjunta de Low (200 Hz), Mid (1 kHz) y High
+(4 kHz). Sigue los controles y la automatización. Con EQ apagado, la respuesta es plana.
+La altura del visual se mantiene al redimensionar la ventana.
+
 ### Visualizador
+
+**Visual**, junto a Voices, permite elegir Tiny, Small, Medium, Large o Hide. Arrastra el
+separador encima del panel visual para ajustar la altura; un doble clic lo oculta/restaura.
+
+
+**Visuals → Add GIF...** añade un GIF animado; también puedes arrastrarlo al reproductor. **My GIFs** permite elegir entre los GIFs
+añadidos. La selección se guarda; conserva los archivos GIF en su ubicación original.
+Arrastrar el separador izquierdo cambia la anchura de la biblioteca sin redimensionar la ventana.
 
 El panel situado debajo del pie de página (justo encima del teclado) muestra una animación
 decorativa que reacciona al sonido que emite el plugin: se mueve suavemente en reposo y cobra
@@ -523,8 +485,19 @@ La librería y los favoritos existentes se reemplazan completamente con los dato
   su nombre y rango.
 - **Clic derecho en los knobs:** Muestra un menú para introducir un valor exacto o restablecer.
 - **Ventana redimensionable:** Arrastra la esquina inferior derecha (mín. 860 × 360).
-- **El banner (parte inferior de la Librería):** Al hacer clic abre www.dskmusic.com.
 
 ---
 
 *DSK Music · www.dskmusic.com*
+
+### Glide and modulation wheel
+
+The **Glide ms** knob in AMP slides new notes from the previous pitch over the chosen time (0–2000 ms). Set it to 0 to turn glide off. Use **Voices = 1** for solo note slides. Glide works with SFZ, SoundFont and Decent Sampler instruments.
+
+In MOD, choose **Wheel: LFO 1**, **Wheel: LFO 2**, or **Wheel: Both** to control modulation depth with a MIDI modulation wheel (CC1). The Depth knobs set the maximum depth: wheel down gives zero modulation, wheel up gives the full knob setting. **Wheel: Off** keeps the knobs in sole control. These settings are saved with the plugin state and can be automated.
+
+The piano keyboard automatically uses dark keys with dark themes and light keys with light themes. Played notes remain highlighted in the theme accent colour.
+
+### Adjustable EQ bands
+
+Choose **Visuals → EQ**. Drag the Low, Mid or High handle horizontally to change its frequency and vertically to boost or cut. Scroll over a handle to adjust its width; larger widths affect a broader range. Right-click a handle to type frequency, gain and width. Low always stays below Mid, and High stays above Mid, including when automating or restoring a preset. Turn EQ on to show and edit the band handles. Changes are saved in plugin state.
